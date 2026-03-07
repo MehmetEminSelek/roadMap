@@ -1,12 +1,22 @@
 import { Tabs } from 'expo-router';
-import { Map, Clock, Heart, User } from 'lucide-react-native';
-import { Platform, View } from 'react-native';
+import { Platform, TouchableOpacity, View, StyleSheet } from 'react-native';
+import { LayoutDashboard, Clock, Heart, User, Navigation } from 'lucide-react-native';
+
+function CenterTabButton({ onPress }: { onPress?: (...args: any[]) => void }) {
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.centerWrap}>
+      <View style={styles.centerBtn}>
+        <Navigation size={26} color="white" />
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#4285F4',
+        tabBarActiveTintColor: '#1C1C1E',
         tabBarInactiveTintColor: '#9AA0A6',
         tabBarStyle: {
           position: 'absolute',
@@ -40,44 +50,64 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Harita',
-          tabBarIcon: ({ color, size }) => <Map color={color} size={22} />,
+          title: 'Özet',
+          tabBarIcon: ({ color }) => <LayoutDashboard color={color} size={22} />,
         }}
       />
       <Tabs.Screen
         name="history"
         options={{
           title: 'Geçmiş',
-          tabBarIcon: ({ color, size }) => <Clock color={color} size={22} />,
+          tabBarIcon: ({ color }) => <Clock color={color} size={22} />,
+        }}
+      />
+      <Tabs.Screen
+        name="calculate"
+        options={{
+          title: '',
+          tabBarButton: (props) => <CenterTabButton onPress={props.onPress ?? undefined} />,
         }}
       />
       <Tabs.Screen
         name="favorites"
         options={{
           title: 'Favoriler',
-          tabBarIcon: ({ color, size }) => <Heart color={color} size={22} />,
+          tabBarIcon: ({ color }) => <Heart color={color} size={22} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profil',
-          tabBarIcon: ({ color, size }) => <User color={color} size={22} />,
-        }}
-      />
-      {/* Hidden tabs */}
-      <Tabs.Screen
-        name="calculate"
-        options={{
-          href: null,
+          tabBarIcon: ({ color }) => <User color={color} size={22} />,
         }}
       />
       <Tabs.Screen
         name="results"
-        options={{
-          href: null,
-        }}
+        options={{ href: null }}
       />
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  centerWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    top: -18,
+  },
+  centerBtn: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#1C1C1E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#1C1C1E',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+});

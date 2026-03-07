@@ -27,4 +27,16 @@ export const routeService = {
   async delete(id: string): Promise<void> {
     await apiClient.delete(`/routes/${id}`);
   },
+
+  async getStats(): Promise<{
+    totalRoutes: number;
+    totalTollCost: number;
+    totalFuelCost: number;
+    totalCost: number;
+    totalDistance: number;
+    totalDuration: number;
+  }> {
+    const response = await apiClient.get('/routes/stats');
+    return response.data;
+  },
 };

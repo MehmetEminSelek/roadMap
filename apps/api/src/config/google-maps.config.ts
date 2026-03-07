@@ -32,17 +32,12 @@ export const validateConfig = (config: EnvironmentVariables) => {
   return config;
 };
 
-export default () => {
-  const config = {
-    googleMaps: {
-      apiKey: process.env.GOOGLE_MAPS_API_KEY,
-      apiUrl: process.env.GOOGLE_MAPS_API_URL || 'https://maps.googleapis.com/maps/api',
-    },
-    googleGemini: {
-      apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-    },
-  };
-
-  validateConfig(config as unknown as EnvironmentVariables);
-  return config;
-};
+export default () => ({
+  googleMaps: {
+    apiKey: process.env.GOOGLE_MAPS_API_KEY,
+    apiUrl: process.env.GOOGLE_MAPS_API_URL || 'https://maps.googleapis.com/maps/api',
+  },
+  googleGemini: {
+    apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+  },
+});

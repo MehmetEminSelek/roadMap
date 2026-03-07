@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService } from '@/services/authService';
-import { STORAGE_KEYS } from '@/services/apiClient';
+import { STORAGE_KEYS, tokenStorage } from '@/services/apiClient';
 import type { User } from '@/types/api';
 
 interface AuthContextValue {
@@ -27,15 +27,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const restoreSession = async () => {
       try {
-        const storedToken = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+        const storedToken = await tokenStorage.getToken();
         if (storedToken) {
           setToken(storedToken);
           const profile = await authService.getProfile();
           setUser(profile);
+        } else if (__DEV__) {
+          // Auto-login with test credentials during development
+          try {
+            const result = await authService.login({
+              email: 'admin@roadmap.com',
+              password: 'Test1234',
+            });
+            await tokenStorage.setToken(result.token);
+            setToken(result.token);
+            setUser(result.user);
+          } catch {
+            // Dev auto-login failed, proceed without authentication
+            setToken(null);
+            setUser(null);
+          }
         }
       } catch {
         // Token expired or invalid, clear storage
-        await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+        await tokenStorage.removeToken();
         await AsyncStorage.removeItem(STORAGE_KEYS.USER_DATA);
         setToken(null);
         setUser(null);
@@ -49,20 +64,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await authService.login({ email, password });
-    await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+    await tokenStorage.setToken(result.token);
     setToken(result.token);
     setUser(result.user);
   }, []);
 
   const register = useCallback(async (email: string, password: string, name?: string) => {
     const result = await authService.register({ email, password, name });
-    await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+    await tokenStorage.setToken(result.token);
     setToken(result.token);
     setUser(result.user);
   }, []);
 
   const logout = useCallback(async () => {
-    await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+    await tokenStorage.removeToken();
     await AsyncStorage.removeItem(STORAGE_KEYS.USER_DATA);
     setToken(null);
     setUser(null);

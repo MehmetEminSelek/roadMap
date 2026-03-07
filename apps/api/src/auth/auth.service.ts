@@ -34,26 +34,24 @@ export class AuthService {
     // Hash password
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    // Create user
+    // Create user (select excludes password from result)
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
         password: hashedPassword,
         name: dto.name,
       },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+      },
     });
 
     // Generate JWT token
     const token = this.generateToken(user.id, user.email);
 
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-      },
-      token,
-    };
+    return { user, token };
   }
 
   async login(dto: LoginDto) {

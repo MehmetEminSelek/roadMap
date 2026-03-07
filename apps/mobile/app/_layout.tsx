@@ -2,7 +2,9 @@ import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { TamaguiProvider } from 'tamagui';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import tamaguiConfig from '../tamagui.config';
 
 function RootNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -43,11 +45,13 @@ function RootNavigator() {
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <RootNavigator />
-      </AuthProvider>
-    </SafeAreaProvider>
+    <TamaguiProvider config={tamaguiConfig} defaultTheme="light">
+      <SafeAreaProvider>
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </TamaguiProvider>
   );
 }
 

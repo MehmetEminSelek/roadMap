@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUUID, IsEnum } from 'class-validator';
+import { IsOptional, IsUUID, IsEnum, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { RouteStatus } from '@prisma/client';
 
@@ -13,13 +13,16 @@ class RouteQueryDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsString()
-  page?: string;
+  @IsInt()
+  @Min(1)
+  page?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsString()
-  limit?: string;
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
 }
 
 export { RouteQueryDto };

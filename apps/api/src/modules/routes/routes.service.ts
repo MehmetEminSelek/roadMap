@@ -37,7 +37,7 @@ export class RoutesService {
     // 3. Calculate toll cost
     const tollData = await this.tolls.calculateTollCost(route, vehicle);
 
-    // 4. Predict fuel cost (AI)using AI
+    // 4. Predict fuel cost using AI
     const fuelResult = await this.fuelAi.calculateFuelCost({
       distanceKm: leg.distance.value / 1000,
       durationSeconds: leg.duration.value,
@@ -47,32 +47,34 @@ export class RoutesService {
     // 5. Calculate total cost
     const totalCost = tollData.totalCost + fuelResult.fuelCost;
 
-    // 6. Save route to database
-    const savedRoute = await this.prisma.route.create({
-      data: {
-        userId,
-        vehicleId: vehicleId || null,
-        origin,
-        destination,
-        originLat: leg.start_location.lat,
-        originLng: leg.start_location.lng,
-        destLat: leg.end_location.lat,
-        destLng: leg.end_location.lng,
-        googleRouteId: route.summary,
-        distance: leg.distance.value,
-        duration: leg.duration.value,
-        routeCoordinates: JSON.stringify(route.overview_polyline.points),
-        tollCost: tollData.totalCost,
-        tollDetails: tollData.details,
-        fuelCost: fuelResult.fuelCost,
-        totalCost: totalCost,
-        aiFuelEstimate: fuelResult.estimatedConsumption,
-        aiConfidence: fuelResult.confidence,
-        status: RouteStatus.COMPLETED,
-      },
-      include: {
-        vehicle: true,
-      },
+    // 6. Save route to database (transaction for data consistency)
+    const savedRoute = await this.prisma.$transaction(async (tx) => {
+      return tx.route.create({
+        data: {
+          userId,
+          vehicleId: vehicleId || null,
+          origin,
+          destination,
+          originLat: leg.start_location.lat,
+          originLng: leg.start_location.lng,
+          destLat: leg.end_location.lat,
+          destLng: leg.end_location.lng,
+          googleRouteId: route.summary,
+          distance: leg.distance.value,
+          duration: leg.duration.value,
+          routeCoordinates: JSON.stringify(route.overview_polyline.points),
+          tollCost: tollData.totalCost,
+          tollDetails: tollData.details,
+          fuelCost: fuelResult.fuelCost,
+          totalCost: totalCost,
+          aiFuelEstimate: fuelResult.estimatedConsumption,
+          aiConfidence: fuelResult.confidence,
+          status: RouteStatus.COMPLETED,
+        },
+        include: {
+          vehicle: true,
+        },
+      });
     });
 
     // 7. Get nearby places for stops if requested
@@ -95,9 +97,9 @@ export class RoutesService {
   }
 
   async findAll(userId: string, query: RouteQueryDto): Promise<any> {
-    const { page = '1', limit = '10', vehicleId, status } = query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const take = parseInt(limit);
+    const { page = 1, limit = 10, vehicleId, status } = query;
+    const skip = (page - 1) * limit;
+    const take = limit;
 
     const where: any = { userId };
 
@@ -124,8 +126,8 @@ export class RoutesService {
       data: routes,
       meta: {
         total,
-        page: parseInt(page),
-        lastPage: Math.ceil(total / parseInt(limit)),
+        page,
+        lastPage: Math.ceil(total / limit),
       },
     };
   }
@@ -147,6 +149,35 @@ export class RoutesService {
     await this.findOne(id, userId); // Check ownership
     await this.prisma.route.delete({ where: { id } });
     return { message: 'Route deleted successfully' };
+  }
+
+  async getStats(userId: string) {
+    const routes = await this.prisma.route.findMany({
+      where: { userId, status: RouteStatus.COMPLETED },
+      select: {
+        tollCost: true,
+        fuelCost: true,
+        totalCost: true,
+        distance: true,
+        duration: true,
+      },
+    });
+
+    const totalRoutes = routes.length;
+    const totalTollCost = routes.reduce((sum, r) => sum + Number(r.tollCost), 0);
+    const totalFuelCost = routes.reduce((sum, r) => sum + Number(r.fuelCost), 0);
+    const totalCost = routes.reduce((sum, r) => sum + Number(r.totalCost), 0);
+    const totalDistance = routes.reduce((sum, r) => sum + r.distance, 0);
+    const totalDuration = routes.reduce((sum, r) => sum + r.duration, 0);
+
+    return {
+      totalRoutes,
+      totalTollCost: Math.round(totalTollCost * 100) / 100,
+      totalFuelCost: Math.round(totalFuelCost * 100) / 100,
+      totalCost: Math.round(totalCost * 100) / 100,
+      totalDistance,
+      totalDuration,
+    };
   }
 
   async previewRoute(origin: string, destination: string) {

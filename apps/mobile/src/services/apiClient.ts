@@ -1,12 +1,38 @@
 import axios from 'axios';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
 export const STORAGE_KEYS = {
-  AUTH_TOKEN: '@roadmap:auth_token',
-  USER_DATA: '@roadmap:user_data',
+  AUTH_TOKEN: 'roadmap_auth_token',
+  USER_DATA: 'roadmap_user_data',
 } as const;
+
+// Secure token storage: uses SecureStore on native, AsyncStorage on web
+export const tokenStorage = {
+  async getToken(): Promise<string | null> {
+    if (Platform.OS === 'web') {
+      return AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    }
+    return SecureStore.getItemAsync(STORAGE_KEYS.AUTH_TOKEN);
+  },
+  async setToken(token: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
+      return;
+    }
+    await SecureStore.setItemAsync(STORAGE_KEYS.AUTH_TOKEN, token);
+  },
+  async removeToken(): Promise<void> {
+    if (Platform.OS === 'web') {
+      await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+      return;
+    }
+    await SecureStore.deleteItemAsync(STORAGE_KEYS.AUTH_TOKEN);
+  },
+};
 
 const apiClient = axios.create({
   baseURL: API_URL,
@@ -19,7 +45,7 @@ const apiClient = axios.create({
 // Request interceptor: inject auth token
 apiClient.interceptors.request.use(
   async (config) => {
-    const token = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    const token = await tokenStorage.getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -38,7 +64,7 @@ apiClient.interceptors.response.use(
   },
   async (error) => {
     if (error.response?.status === 401) {
-      await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+      await tokenStorage.removeToken();
       await AsyncStorage.removeItem(STORAGE_KEYS.USER_DATA);
     }
 

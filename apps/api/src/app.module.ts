@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { PrismaService } from './prisma/prisma.service';
 import googleMapsConfig from './config/google-maps.config';
@@ -20,12 +22,22 @@ function validateConfig(config: Record<string, unknown>) {
     'GOOGLE_MAPS_API_KEY',
     'GOOGLE_GENERATIVE_AI_API_KEY',
     'DATABASE_URL',
+    'JWT_SECRET',
   ];
 
+  const missing: string[] = [];
   for (const varName of requiredVars) {
     if (!config[varName]) {
-      console.warn(`⚠️  Missing required environment variable: ${varName}`);
+      missing.push(varName);
     }
+  }
+
+  if (missing.length > 0) {
+    const message = `Missing required environment variables: ${missing.join(', ')}`;
+    if (config['NODE_ENV'] === 'production') {
+      throw new Error(message);
+    }
+    console.warn(`⚠️  ${message}`);
   }
 
   return config;
@@ -39,6 +51,10 @@ function validateConfig(config: Record<string, unknown>) {
       load: [googleMapsConfig],
       validate: validateConfig,
     }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 60,
+    }]),
     PrismaModule,
     VehiclesModule,
     RoutesModule,
@@ -49,6 +65,12 @@ function validateConfig(config: Record<string, unknown>) {
     FavoritesModule,
     AuthModule,
   ],
-  providers: [PrismaService],
+  providers: [
+    PrismaService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule { }

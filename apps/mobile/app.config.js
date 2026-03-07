@@ -2,6 +2,7 @@ export default {
   expo: {
     name: "RoadMap",
     slug: "roadmap",
+    scheme: "roadmap",
     version: "1.0.0",
     orientation: "portrait",
     updates: {
@@ -18,11 +19,17 @@ export default {
       }
     },
     android: {
-      package: "com.roadmap.app"
+      package: "com.roadmap.app",
+      config: {
+        googleMaps: {
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+        }
+      }
     },
     plugins: [
       "expo-router",
-      "expo-av"
+      "expo-av",
+      "expo-secure-store"
     ],
     extra: {
       eas: {

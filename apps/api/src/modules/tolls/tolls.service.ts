@@ -121,10 +121,8 @@ export class TollsService {
       }
     }
 
-    if (details.length > 0) {
-      console.log(`🚗 Gişe eşleşmeleri (${details.length}):`);
-      details.forEach((d) => console.log(`  - ${d.name} (${d.highway}): ${d.amount}₺`));
-      console.log(`💰 Toplam gişe: ${totalCost}₺`);
+    if (details.length > 0 && process.env.NODE_ENV !== 'production') {
+      console.log(`Gişe eşleşmeleri (${details.length}), toplam: ${totalCost}₺`);
     }
 
     // Fall back to estimate if no stations matched

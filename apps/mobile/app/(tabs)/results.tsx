@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Dimensions, LayoutAnimation, Platform, UIManager, Modal } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { MapPin, Car, Clock, Fuel, ChevronLeft, Heart, Navigation, ChevronDown, ChevronUp, Coffee, X, Star } from 'lucide-react-native';
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import { routeService } from '@/services/routeService';
 import { historyService } from '@/services/historyService';
 import type { Route } from '@/types/api';
@@ -13,18 +13,48 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+const MAP_PROVIDER = Platform.OS === 'ios' ? PROVIDER_DEFAULT : PROVIDER_GOOGLE;
+
+const getGradientColors = (count: number): string[] => {
+  if (count === 0) return [];
+  const toHex = (n: number) => Math.round(n).toString(16).padStart(2, '0');
+  const [sR, sG, sB] = [52, 199, 89];   // #34C759 yeşil (başlangıç)
+  const [eR, eG, eB] = [255, 45, 85];   // #FF2D55 kırmızı (bitiş)
+  return Array.from({ length: count }, (_, i) => {
+    const t = i / Math.max(count - 1, 1);
+    return `#${toHex(sR + (eR - sR) * t)}${toHex(sG + (eG - sG) * t)}${toHex(sB + (eB - sB) * t)}`;
+  });
+};
+
 export default function ResultsScreen() {
   const params = useLocalSearchParams();
+  const mapRef = useRef<MapView | null>(null);
   const [route, setRoute] = useState<Route | null>(null);
   const [loading, setLoading] = useState(true);
   const [tollExpanded, setTollExpanded] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [decodedCoords, setDecodedCoords] = useState<{ latitude: number, longitude: number }[]>([]);
+  const [animatedCoords, setAnimatedCoords] = useState<{ latitude: number, longitude: number }[]>([]);
   const [stopSuggestions, setStopSuggestions] = useState<any[]>([]);
 
   useEffect(() => {
     loadResult();
   }, [params.routeId]);
+
+  useEffect(() => {
+    if (decodedCoords.length === 0) return;
+    setAnimatedCoords([]);
+    const TOTAL_FRAMES = 40;
+    const STEP = Math.max(1, Math.ceil(decodedCoords.length / TOTAL_FRAMES));
+    let frame = 0;
+    const animate = () => {
+      frame++;
+      const end = Math.min(frame * STEP, decodedCoords.length);
+      setAnimatedCoords(decodedCoords.slice(0, end));
+      if (end < decodedCoords.length) requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+  }, [decodedCoords]);
 
   const loadResult = async () => {
     const routeId = params.routeId as string;
@@ -219,7 +249,7 @@ export default function ResultsScreen() {
           <View pointerEvents="none" style={styles.mapPreviewWrapper}>
             <MapView
               style={styles.mapPreview}
-              provider={PROVIDER_DEFAULT}
+              provider={MAP_PROVIDER}
               initialRegion={
                 route.originLat ? {
                   latitude: (route.originLat + route.destLat) / 2,
@@ -233,10 +263,10 @@ export default function ResultsScreen() {
               pitchEnabled={false}
               rotateEnabled={false}
             >
-              {decodedCoords.length > 0 && (
+              {animatedCoords.length > 0 && (
                 <Polyline
-                  coordinates={decodedCoords}
-                  strokeColor="#0A84FF"
+                  coordinates={animatedCoords}
+                  strokeColors={getGradientColors(animatedCoords.length)}
                   strokeWidth={4}
                 />
               )}
@@ -244,12 +274,12 @@ export default function ResultsScreen() {
               {/* Origin & Destination Markers */}
               {route.originLat && route.originLng && (
                 <Marker coordinate={{ latitude: route.originLat, longitude: route.originLng }}>
-                  <View style={[styles.mapMarker, { backgroundColor: '#1C1C1E' }]} />
+                  <View style={[styles.mapMarker, { backgroundColor: '#34C759' }]} />
                 </Marker>
               )}
               {route.destLat && route.destLng && (
                 <Marker coordinate={{ latitude: route.destLat, longitude: route.destLng }}>
-                  <View style={[styles.mapMarker, { backgroundColor: '#0A84FF' }]} />
+                  <View style={[styles.mapMarker, { backgroundColor: '#FF2D55' }]} />
                 </Marker>
               )}
 
@@ -372,29 +402,30 @@ export default function ResultsScreen() {
           </TouchableOpacity>
 
           <MapView
+            ref={mapRef}
             style={styles.fullMap}
-            provider={PROVIDER_DEFAULT}
+            provider={MAP_PROVIDER}
             showsUserLocation
-            initialRegion={
-              route.originLat ? {
-                latitude: (route.originLat + route.destLat) / 2,
-                longitude: (route.originLng + route.destLng) / 2,
-                latitudeDelta: Math.abs(route.originLat - route.destLat) * 1.5 || 2,
-                longitudeDelta: Math.abs(route.originLng - route.destLng) * 1.5 || 2,
-              } : undefined
-            }
+            onMapReady={() => {
+              if (decodedCoords.length > 0) {
+                mapRef.current?.fitToCoordinates(decodedCoords, {
+                  edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
+                  animated: true,
+                });
+              }
+            }}
           >
-            {decodedCoords.length > 0 && (
-              <Polyline coordinates={decodedCoords} strokeColor="#0A84FF" strokeWidth={5} />
+            {animatedCoords.length > 0 && (
+              <Polyline coordinates={animatedCoords} strokeColors={getGradientColors(animatedCoords.length)} strokeWidth={5} />
             )}
             {route.originLat && route.originLng && (
               <Marker coordinate={{ latitude: route.originLat, longitude: route.originLng }}>
-                <View style={[styles.mapMarker, { backgroundColor: '#1C1C1E' }]} />
+                <View style={[styles.mapMarker, { backgroundColor: '#34C759' }]} />
               </Marker>
             )}
             {route.destLat && route.destLng && (
               <Marker coordinate={{ latitude: route.destLat, longitude: route.destLng }}>
-                <View style={[styles.mapMarker, { backgroundColor: '#0A84FF' }]} />
+                <View style={[styles.mapMarker, { backgroundColor: '#FF2D55' }]} />
               </Marker>
             )}
             {stopSuggestions.map((stop, idx) => (

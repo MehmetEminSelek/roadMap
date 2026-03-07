@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Body, Param, Delete, UseGuards, Request, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { RoutesService } from './routes.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { RouteQueryDto } from './dto/route-query.dto';
@@ -20,10 +21,19 @@ export class RoutesController {
     return this.routesService.calculateRoute(createRouteDto, req.user.sub);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('stats')
+  getStats(@Request() req: UserRequest) {
+    return this.routesService.getStats(req.user.sub);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
   @Get('preview')
   previewRoute(
     @Query('origin') origin: string,
     @Query('destination') destination: string,
+    @Request() req: UserRequest,
   ) {
     return this.routesService.previewRoute(origin, destination);
   }
