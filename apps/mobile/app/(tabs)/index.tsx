@@ -5,8 +5,12 @@ import {
   TouchableOpacity,
   Platform,
   ActivityIndicator,
+  StyleSheet,
+  View,
 } from 'react-native';
 import { router } from 'expo-router';
+import MapView, { PROVIDER_DEFAULT } from 'react-native-maps';
+import * as Location from 'expo-location';
 import {
   YStack,
   XStack,
@@ -39,6 +43,23 @@ export default function DashboardScreen() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  // iOS: request location permission and get current position
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setUserLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        } catch {
+          // Use default Turkey region if location unavailable
+        }
+      }
+    })();
+  }, []);
 
   const loadData = async () => {
     try {
@@ -101,23 +122,48 @@ export default function DashboardScreen() {
           />
         }
       >
-        {/* Dark Hero Header */}
-        <YStack
-          backgroundColor="#1C1C1E"
-          paddingTop={Platform.OS === 'ios' ? 64 : 48}
-          paddingHorizontal={24}
-          paddingBottom={48}
-        >
-          <Text color="#6B7280" fontSize={14} fontWeight="500" letterSpacing={0.5}>
-            MERHABA
-          </Text>
-          <H1 color="white" fontSize={34} fontWeight="800" letterSpacing={-1} marginTop={4}>
-            {user?.name || 'Kullanıcı'}
-          </H1>
-          <Text color="#6B7280" fontSize={15} marginTop={6}>
-            Yolculuk özetine hoş geldin
-          </Text>
-        </YStack>
+        {/* Hero — iOS: live Apple MapKit, Android: dark header */}
+        {Platform.OS === 'ios' ? (
+          <View style={heroStyles.mapHero}>
+            <MapView
+              style={StyleSheet.absoluteFillObject}
+              provider={PROVIDER_DEFAULT}
+              showsUserLocation
+              showsCompass={false}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              pitchEnabled={false}
+              rotateEnabled={false}
+              region={userLocation
+                ? { ...userLocation, latitudeDelta: 0.15, longitudeDelta: 0.15 }
+                : { latitude: 39.0, longitude: 35.0, latitudeDelta: 12, longitudeDelta: 12 }
+              }
+            />
+            {/* Gradient overlay for text readability */}
+            <View style={heroStyles.gradient} />
+            <View style={heroStyles.textOverlay}>
+              <Text color="rgba(255,255,255,0.7)" fontSize={13} fontWeight="600" letterSpacing={0.8}>
+                MERHABA
+              </Text>
+              <H1 color="white" fontSize={32} fontWeight="800" letterSpacing={-1} marginTop={2}>
+                {user?.name || 'Kullanıcı'}
+              </H1>
+            </View>
+          </View>
+        ) : (
+          <YStack
+            backgroundColor="#1C1C1E"
+            paddingTop={48}
+            paddingHorizontal={24}
+            paddingBottom={48}
+          >
+            <Text color="#6B7280" fontSize={14} fontWeight="500" letterSpacing={0.5}>MERHABA</Text>
+            <H1 color="white" fontSize={34} fontWeight="800" letterSpacing={-1} marginTop={4}>
+              {user?.name || 'Kullanıcı'}
+            </H1>
+            <Text color="#6B7280" fontSize={15} marginTop={6}>Yolculuk özetine hoş geldin</Text>
+          </YStack>
+        )}
 
         {/* Stats Cards — overlap the header */}
         <YStack marginTop={-28} paddingHorizontal={16}>
@@ -373,3 +419,26 @@ export default function DashboardScreen() {
     </YStack>
   );
 }
+
+const heroStyles = StyleSheet.create({
+  mapHero: {
+    height: 260,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  gradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+  },
+  textOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+    paddingTop: 80,
+    // Dark gradient from transparent to black-ish
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+});

@@ -29,7 +29,8 @@ export default {
     plugins: [
       "expo-router",
       "expo-av",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-location"
     ],
     extra: {
       eas: {

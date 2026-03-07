@@ -95,7 +95,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    top: -18,
+    marginBottom: 28,
   },
   centerBtn: {
     width: 58,
