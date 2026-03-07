@@ -1,0 +1,201 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// GroomApp User ile aynı tablo kullanılacak
+// ==========================================
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String?
+  password        String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  vehicles        Vehicle[]
+  routes          Route[]
+  favoriteRoutes  FavoriteRoute[]
+  favoritePlaces  FavoritePlace[]
+}
+
+// ==========================================
+// Vehicle Models
+// ==========================================
+model Vehicle {
+  id                  String    @id @default(cuid())
+  userId              String
+  name                String    // "Astra 1.4 Turbo"
+  brand               String
+  model               String
+  fuelType            FuelType  // PETROL, DIZEL, HYBRID, ELECTRIC, LPG
+  enginePower         Int       // HP (beygir gücü)
+  engineCapacity      Int       // cc (motor hacmi)
+  weight              Int       // kg (boş ağırlık)
+  transmission        Transmission
+  hasClimateControl   Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  routes              Route[]
+
+  @@index([userId])
+}
+
+model VehicleMake {
+  id          String       @id @default(cuid())
+  name        String       // "Audi", "BMW", "Ford"
+  vehicles    VehicleModel[]
+
+  @@index([name])
+}
+
+model VehicleModel {
+  id          String         @id @default(cuid())
+  makeId      String
+  name        String         // "A3", "Astra", "Corolla"
+  vehicleMake VehicleMake    @relation(fields: [makeId], references: [id], onDelete: Cascade)
+
+  @@index([makeId])
+}
+
+// ==========================================
+// Route & Calculation Models
+// ==========================================
+enum FuelType {
+  PETROL
+  DIZEL
+  HYBRID
+  ELECTRIC
+  LPG
+}
+
+enum Transmission {
+  MANUAL
+  AUTOMATIC
+  CVT
+  SEMI_AUTOMATIC
+}
+
+enum VehicleType {
+  CAR
+  MOTORCYCLE
+  BUS
+  TRUCK
+  VAN
+}
+
+enum RouteStatus {
+  PENDING
+  CALCULATING
+  COMPLETED
+  FAILED
+}
+
+model Route {
+  id                  String        @id @default(cuid())
+  userId              String
+  vehicleId           String?
+
+  // Rota bilgileri
+  origin              String
+  destination         String
+  originLat           Float
+  originLng           Float
+  destLat             Float
+  destLng             Float
+
+  // Google Maps route data
+  googleRouteId       String?
+  distance            Int           // Metre
+  duration            Int           // Saniye
+  routeCoordinates    String?       // GeoJSON
+
+  // Hesaplanan maliyetler
+  tollCost            Decimal       @db.Decimal(10, 2)
+  tollDetails         Json?         
+  fuelCost            Decimal       @db.Decimal(10, 2)
+  totalCost           Decimal       @db.Decimal(10, 2)
+
+  // AI faktörleri
+  aiFuelEstimate      Decimal?      @db.Decimal(5, 2)
+  aiConfidence        Float?
+
+  status              RouteStatus   @default(COMPLETED)
+
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle             Vehicle?      @relation(fields: [vehicleId], references: [id])
+  favoriteRoute       FavoriteRoute?
+
+  @@index([userId])
+  @@index([vehicleId])
+}
+
+// ==========================================
+// Toll / KGM Models
+// ==========================================
+model TollStation {
+  id        String     @id @default(cuid())
+  name      String
+  location  String
+  highway   String     @default("")
+  lat       Float?
+  lng       Float?
+  isActive  Boolean  @default(true)
+
+  tolls     TollRate[]
+}
+
+model TollRate {
+  id            String        @id @default(cuid())
+  tollStationId String
+  vehicleType   VehicleType
+  amount        Decimal       @db.Decimal(8, 2)
+  isActive      Boolean       @default(true)
+
+  tollStation   TollStation   @relation(fields: [tollStationId], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// Favorite Models
+// ==========================================
+enum PlaceType {
+  GAS_STATION
+  RESTAURANT
+  SERVICE_AREA
+  HOTEL
+  PARK
+}
+
+model FavoriteRoute {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String   // "İstanbul-Ankara İş Yolculuğu"
+  routeId     String   @unique
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  route       Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+}
+
+model FavoritePlace {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String   // "Erenköy Benzin"
+  lat         Float
+  lng         Float
+  address     String?
+  placeId     String?  // Google Places ID
+  type        PlaceType
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
