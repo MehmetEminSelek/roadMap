@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Delete, UseGuards, Request, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { RoutesService } from './routes.service';
+import { GoogleMapsService } from './google-maps.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { RouteQueryDto } from './dto/route-query.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -12,7 +13,16 @@ interface UserRequest extends ExpressRequest {
 
 @Controller('routes')
 export class RoutesController {
-  constructor(private readonly routesService: RoutesService) { }
+  constructor(
+    private readonly routesService: RoutesService,
+    private readonly googleMapsService: GoogleMapsService,
+  ) { }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('autocomplete')
+  autocomplete(@Query('input') input: string) {
+    return this.googleMapsService.autocomplete(input || '');
+  }
 
   // Static routes MUST come before parameterized routes
   @UseGuards(JwtAuthGuard)

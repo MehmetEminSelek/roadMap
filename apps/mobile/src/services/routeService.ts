@@ -39,4 +39,10 @@ export const routeService = {
     const response = await apiClient.get('/routes/stats');
     return response.data;
   },
+
+  async autocomplete(input: string): Promise<{ description: string; placeId: string }[]> {
+    if (!input || input.length < 2) return [];
+    const response = await apiClient.get('/routes/autocomplete', { params: { input } });
+    return response.data;
+  },
 };

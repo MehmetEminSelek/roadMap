@@ -97,6 +97,20 @@ const tollStations: TollStationData[] = [
             { vehicleType: 'TRUCK', amount: 2490 },
         ],
     },
+    {
+        name: 'Avrasya Tüneli',
+        location: 'İstanbul Kazlıçeşme-Göztepe',
+        highway: 'Tünel',
+        lat: 41.0042,
+        lng: 28.9780,
+        rates: [
+            { vehicleType: 'CAR', amount: 250 },
+            { vehicleType: 'MOTORCYCLE', amount: 175 },
+            { vehicleType: 'VAN', amount: 375 },
+            { vehicleType: 'BUS', amount: 0 },
+            { vehicleType: 'TRUCK', amount: 0 },
+        ],
+    },
 
     // ==========================================
     // ANADOLU OTOYOLU (O-4) — Çamlıca → Akıncı (İstanbul-Ankara)
@@ -346,6 +360,111 @@ const tollStations: TollStationData[] = [
             { vehicleType: 'TRUCK', amount: 705 },
         ],
     },
+
+    // ==========================================
+    // İSTANBUL-İZMİR OTOYOLU (O-5) — Orhangazi → İzmir
+    // KGM 2026: Osmangazi Köprüsü + Otoyol
+    // Osmangazi Köprüsü zaten Köprü bölümünde (995₺)
+    // Bu gişeler köprüden sonra otoyol kısmı
+    // ==========================================
+    {
+        name: 'Orhangazi Gişeleri',
+        location: 'Bursa Orhangazi',
+        highway: 'İstanbul-İzmir Otoyolu (O-5)',
+        lat: 40.4890,
+        lng: 29.3170,
+        rates: [
+            { vehicleType: 'CAR', amount: 50 },
+            { vehicleType: 'MOTORCYCLE', amount: 35 },
+            { vehicleType: 'VAN', amount: 80 },
+            { vehicleType: 'BUS', amount: 95 },
+            { vehicleType: 'TRUCK', amount: 125 },
+        ],
+    },
+    {
+        name: 'Bursa Kuzey Gişeleri',
+        location: 'Bursa Kuzey',
+        highway: 'İstanbul-İzmir Otoyolu (O-5)',
+        lat: 40.2650,
+        lng: 29.0780,
+        rates: [
+            { vehicleType: 'CAR', amount: 50 },
+            { vehicleType: 'MOTORCYCLE', amount: 60 },
+            { vehicleType: 'VAN', amount: 105 },
+            { vehicleType: 'BUS', amount: 125 },
+            { vehicleType: 'TRUCK', amount: 165 },
+        ],
+    },
+    {
+        name: 'Karacabey Gişeleri',
+        location: 'Bursa Karacabey',
+        highway: 'İstanbul-İzmir Otoyolu (O-5)',
+        lat: 40.2191,
+        lng: 28.3600,
+        rates: [
+            { vehicleType: 'CAR', amount: 215 },
+            { vehicleType: 'MOTORCYCLE', amount: 150 },
+            { vehicleType: 'VAN', amount: 345 },
+            { vehicleType: 'BUS', amount: 405 },
+            { vehicleType: 'TRUCK', amount: 540 },
+        ],
+    },
+    {
+        name: 'Balıkesir Batı Gişeleri',
+        location: 'Balıkesir',
+        highway: 'İstanbul-İzmir Otoyolu (O-5)',
+        lat: 39.6500,
+        lng: 27.8820,
+        rates: [
+            { vehicleType: 'CAR', amount: 420 },
+            { vehicleType: 'MOTORCYCLE', amount: 295 },
+            { vehicleType: 'VAN', amount: 675 },
+            { vehicleType: 'BUS', amount: 800 },
+            { vehicleType: 'TRUCK', amount: 1055 },
+        ],
+    },
+    {
+        name: 'Akhisar Gişeleri',
+        location: 'Manisa Akhisar',
+        highway: 'İstanbul-İzmir Otoyolu (O-5)',
+        lat: 38.9170,
+        lng: 27.8380,
+        rates: [
+            { vehicleType: 'CAR', amount: 600 },
+            { vehicleType: 'MOTORCYCLE', amount: 420 },
+            { vehicleType: 'VAN', amount: 960 },
+            { vehicleType: 'BUS', amount: 1140 },
+            { vehicleType: 'TRUCK', amount: 1505 },
+        ],
+    },
+    {
+        name: 'Turgutlu Gişeleri',
+        location: 'Manisa Turgutlu',
+        highway: 'İstanbul-İzmir Otoyolu (O-5)',
+        lat: 38.5000,
+        lng: 27.7050,
+        rates: [
+            { vehicleType: 'CAR', amount: 870 },
+            { vehicleType: 'MOTORCYCLE', amount: 610 },
+            { vehicleType: 'VAN', amount: 1395 },
+            { vehicleType: 'BUS', amount: 1655 },
+            { vehicleType: 'TRUCK', amount: 2185 },
+        ],
+    },
+    {
+        name: 'İzmir Çıkış Gişeleri',
+        location: 'İzmir',
+        highway: 'İstanbul-İzmir Otoyolu (O-5)',
+        lat: 38.4580,
+        lng: 27.2150,
+        rates: [
+            { vehicleType: 'CAR', amount: 970 },
+            { vehicleType: 'MOTORCYCLE', amount: 680 },
+            { vehicleType: 'VAN', amount: 1555 },
+            { vehicleType: 'BUS', amount: 1845 },
+            { vehicleType: 'TRUCK', amount: 2440 },
+        ],
+    },
 ];
 
 async function main() {
@@ -363,6 +482,7 @@ async function main() {
             data: {
                 name: station.name,
                 location: station.location,
+                highway: station.highway,
                 lat: station.lat,
                 lng: station.lng,
                 isActive: true,
@@ -396,6 +516,7 @@ async function main() {
     console.log('Otoyollar:');
     console.log('  • Anadolu Otoyolu (O-4): Çamlıca→Akıncı = 338₺');
     console.log('  • Avrupa Otoyolu (O-3): Mahmutbey→Edirne = 378₺');
+    console.log('  • İstanbul-İzmir Otoyolu (O-5): Orhangazi→İzmir = 970₺');
 }
 
 main()

@@ -62,7 +62,24 @@ export class RoutesService {
           googleRouteId: route.summary,
           distance: leg.distance.value,
           duration: leg.duration.value,
-          routeCoordinates: JSON.stringify(route.overview_polyline.points),
+          routeCoordinates: JSON.stringify(
+            leg.steps.flatMap(step => {
+              // Decode each step's polyline for accurate road-following coordinates
+              const encoded = step.polyline?.points || '';
+              const coords: { lat: number; lng: number }[] = [];
+              let index = 0, lat = 0, lng = 0;
+              while (index < encoded.length) {
+                let b, shift = 0, result = 0;
+                do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+                lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+                shift = 0; result = 0;
+                do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+                lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+                coords.push({ lat: lat / 1e5, lng: lng / 1e5 });
+              }
+              return coords;
+            })
+          ),
           tollCost: tollData.totalCost,
           tollDetails: tollData.details,
           fuelCost: fuelResult.fuelCost,
@@ -83,6 +100,14 @@ export class RoutesService {
       stops = await this.places.getStopsAlongRoute(route, stopsCount);
     }
 
+    // 8. Get rest areas along the route (20km radius)
+    let nearbyRestAreas: { name: string; lat: number; lng: number; type: string; rating?: number; vicinity?: string }[] = [];
+    try {
+      nearbyRestAreas = await this.places.getRestAreasAlongRoute(route, 20);
+    } catch (e) {
+      // Non-critical, continue without rest areas
+    }
+
     return {
       route: savedRoute,
       tollCost: tollData.totalCost,
@@ -91,6 +116,7 @@ export class RoutesService {
       totalCost,
       fuelDetails: fuelResult,
       stops,
+      nearbyRestAreas,
       duration: leg.duration.text,
       distance: leg.distance.text,
     };

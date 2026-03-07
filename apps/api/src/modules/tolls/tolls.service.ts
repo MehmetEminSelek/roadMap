@@ -56,7 +56,7 @@ export class TollsService {
     vehicle: Vehicle | null,
   ): Promise<{
     totalCost: number;
-    details: { name: string; highway: string; amount: number }[];
+    details: { name: string; highway: string; amount: number; lat: number; lng: number }[];
   }> {
     // Get stations with coordinates and their rates
     const stations = await this.prisma.tollStation.findMany({
@@ -70,54 +70,63 @@ export class TollsService {
       },
     });
 
-    if (stations.length === 0 || !route.overview_polyline?.points) {
+    if (stations.length === 0 || !route.legs?.[0]?.steps) {
       return { totalCost: this.estimateTollCost(route, vehicle), details: [] };
     }
 
-    // Decode polyline and find stations along the route
-    const polylinePoints = decodePolyline(route.overview_polyline.points);
+    // Decode ALL step-level polylines for accurate matching
+    const polylinePoints: { lat: number; lng: number }[] = [];
+    for (const step of route.legs[0].steps) {
+      if (step.polyline?.points) {
+        polylinePoints.push(...decodePolyline(step.polyline.points));
+      }
+    }
+    if (polylinePoints.length === 0 && route.overview_polyline?.points) {
+      polylinePoints.push(...decodePolyline(route.overview_polyline.points));
+    }
+
     const vehicleType = this.getVehicleType(vehicle);
     let totalCost = 0;
-    const details: { name: string; highway: string; amount: number }[] = [];
-    const highwayMatches: Record<string, { name: string; amount: number }[]> = {};
+    const details: { name: string; highway: string; amount: number; lat: number; lng: number }[] = [];
+    const highwayMatches: Record<string, { name: string; amount: number; lat: number; lng: number }[]> = {};
 
     for (const station of stations) {
       if (station.lat === null || station.lng === null) continue;
 
-      // Check if any polyline point is within 5km of the station
-      // Google's overview polyline is simplified, so we need a larger radius
+      // Check if any polyline point is within 2km of the station
+      // Using step-level polylines allows tighter radius
       const isOnRoute = polylinePoints.some(
-        (point) => haversineDistance(point, { lat: station.lat!, lng: station.lng! }) < 5.0,
+        (point) => haversineDistance(point, { lat: station.lat!, lng: station.lng! }) < 2.0,
       );
 
       if (isOnRoute) {
         const rate = station.tolls.find((r) => r.vehicleType === vehicleType);
-        if (rate) {
+        if (rate && Number(rate.amount) > 0) {
           const highway = (station as any).highway || 'Diğer';
           if (!highwayMatches[highway]) {
             highwayMatches[highway] = [];
           }
 
-          highwayMatches[highway].push({ name: station.name, amount: Number(rate.amount) });
+          highwayMatches[highway].push({ name: station.name, amount: Number(rate.amount), lat: station.lat!, lng: station.lng! });
         }
       }
     }
 
     // KGM Pricing Logic:
-    // - Bridges (Köprü): Point-based, sum them up
+    // - Bridges/Tunnels (Köprü, Tünel): Point-based, sum them up
     // - Highways (Otoyol): Cumulative/distance-based from main entry, take the MAX matched exit fee
     for (const [highway, matches] of Object.entries(highwayMatches)) {
-      if (highway.includes('Köprü') || highway === 'Diğer') {
+      if (highway.includes('Köprü') || highway.includes('Tünel') || highway === 'Diğer') {
         matches.forEach((m) => {
           totalCost += m.amount;
-          details.push({ name: m.name, highway, amount: m.amount });
+          details.push({ name: m.name, highway, amount: m.amount, lat: m.lat, lng: m.lng });
         });
       } else {
         const maxMatch = matches.reduce((max, current) =>
           current.amount > max.amount ? current : max,
         );
         totalCost += maxMatch.amount;
-        details.push({ name: maxMatch.name, highway, amount: maxMatch.amount });
+        details.push({ name: maxMatch.name, highway, amount: maxMatch.amount, lat: maxMatch.lat, lng: maxMatch.lng });
       }
     }
 
@@ -136,6 +145,8 @@ export class TollsService {
               name: 'Otoyol / Köprü Kullanım Tahmini',
               highway: 'KGM İstasyon Eşleşmesi Kurulamadı',
               amount: estimatedCost,
+              lat: 0,
+              lng: 0,
             },
           ],
         };

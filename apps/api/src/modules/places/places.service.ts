@@ -79,6 +79,82 @@ export class PlacesService {
     return stops;
   }
 
+  /**
+   * Discover rest areas along the route within a given radius.
+   * Samples points every ~80km and searches for gas stations & restaurants.
+   */
+  async getRestAreasAlongRoute(
+    route: DirectionsRoute,
+    radiusKm: number = 20,
+  ): Promise<{ name: string; lat: number; lng: number; type: string; rating?: number; vicinity?: string }[]> {
+    const leg = route.legs[0];
+    if (!leg?.steps?.length) return [];
+
+    const totalDistance = leg.distance.value; // meters
+    const SAMPLE_INTERVAL = 80000; // sample every 80km
+    const sampleCount = Math.max(1, Math.floor(totalDistance / SAMPLE_INTERVAL));
+
+    // Collect sample points along the route
+    const samplePoints: { lat: number; lng: number }[] = [];
+    let cumulativeDistance = 0;
+    let nextSampleAt = SAMPLE_INTERVAL;
+
+    for (const step of leg.steps) {
+      cumulativeDistance += step.distance.value;
+      if (cumulativeDistance >= nextSampleAt && samplePoints.length < sampleCount) {
+        samplePoints.push({
+          lat: step.end_location.lat,
+          lng: step.end_location.lng,
+        });
+        nextSampleAt += SAMPLE_INTERVAL;
+      }
+    }
+
+    // If no sample points (short route), use midpoint
+    if (samplePoints.length === 0) {
+      const midIdx = Math.floor(leg.steps.length / 2);
+      if (leg.steps[midIdx]) {
+        samplePoints.push({
+          lat: leg.steps[midIdx].end_location.lat,
+          lng: leg.steps[midIdx].end_location.lng,
+        });
+      }
+    }
+
+    // Search for rest areas near each sample point
+    const allRestAreas: { name: string; lat: number; lng: number; type: string; rating?: number; vicinity?: string }[] = [];
+    const seenNames = new Set<string>();
+
+    for (const point of samplePoints) {
+      try {
+        const places = await this.googleMaps.getNearbyPlaces(
+          point.lat,
+          point.lng,
+          radiusKm * 1000,
+          'gas_station',
+        );
+
+        for (const place of places.slice(0, 5)) {
+          const name = place.name || '';
+          if (seenNames.has(name)) continue;
+          seenNames.add(name);
+          allRestAreas.push({
+            name,
+            lat: place.geometry?.location?.lat ?? point.lat,
+            lng: place.geometry?.location?.lng ?? point.lng,
+            type: 'GAS_STATION',
+            rating: place.rating,
+            vicinity: place.formatted_address,
+          });
+        }
+      } catch (e) {
+        // Silently skip failed searches
+      }
+    }
+
+    return allRestAreas;
+  }
+
   async addFavoritePlace(
     userId: string,
     name: string,

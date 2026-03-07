@@ -30,26 +30,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const storedToken = await tokenStorage.getToken();
         if (storedToken) {
           setToken(storedToken);
-          const profile = await authService.getProfile();
-          setUser(profile);
-        } else if (__DEV__) {
-          // Auto-login with test credentials during development
           try {
-            const result = await authService.login({
-              email: 'admin@roadmap.com',
-              password: 'Test1234',
-            });
-            await tokenStorage.setToken(result.token);
-            setToken(result.token);
-            setUser(result.user);
+            const profile = await authService.getProfile();
+            setUser(profile);
           } catch {
-            // Dev auto-login failed, proceed without authentication
-            setToken(null);
-            setUser(null);
+            // Token might be invalid after API restart, try auto-login in dev
+            if (__DEV__) {
+              await tokenStorage.removeToken();
+              await devAutoLogin();
+            } else {
+              await tokenStorage.removeToken();
+              setToken(null);
+              setUser(null);
+            }
           }
+        } else if (__DEV__) {
+          await devAutoLogin();
         }
       } catch {
-        // Token expired or invalid, clear storage
         await tokenStorage.removeToken();
         await AsyncStorage.removeItem(STORAGE_KEYS.USER_DATA);
         setToken(null);
@@ -57,6 +55,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } finally {
         setIsLoading(false);
       }
+    };
+
+    const devAutoLogin = async () => {
+      const MAX_RETRIES = 3;
+      for (let i = 0; i < MAX_RETRIES; i++) {
+        try {
+          const result = await authService.login({
+            email: 'admin@roadmap.com',
+            password: 'Test1234',
+          });
+          await tokenStorage.setToken(result.token);
+          setToken(result.token);
+          setUser(result.user);
+          return;
+        } catch {
+          if (i < MAX_RETRIES - 1) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+      }
+      // All retries failed
+      setToken(null);
+      setUser(null);
     };
 
     restoreSession();

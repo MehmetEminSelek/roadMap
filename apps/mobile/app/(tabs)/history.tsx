@@ -165,6 +165,8 @@ export default function HistoryScreen() {
                     tollCost: String(item.tollCost),
                     fuelCost: String(item.fuelCost),
                     totalCost: String(item.totalCost),
+                    routeCoordinates: item.routeCoordinates || '',
+                    tollDetails: JSON.stringify(item.tollDetails || []),
                   },
                 })
               }

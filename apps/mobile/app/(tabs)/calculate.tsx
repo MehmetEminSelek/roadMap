@@ -10,6 +10,7 @@ import {
   Platform,
   ScrollView,
   KeyboardAvoidingView,
+  FlatList,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +38,9 @@ export default function CalculateScreen() {
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [vehiclePanelOpen, setVehiclePanelOpen] = useState(false);
   const [calculating, setCalculating] = useState(false);
+  const [suggestions, setSuggestions] = useState<{ description: string; placeId: string }[]>([]);
+  const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -76,6 +80,29 @@ export default function CalculateScreen() {
     setDestination(tmp);
   };
 
+  const handleTextChange = (text: string, field: 'origin' | 'destination') => {
+    if (field === 'origin') setOrigin(text);
+    else setDestination(text);
+    setActiveField(field);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (text.length < 2) { setSuggestions([]); return; }
+
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const results = await routeService.autocomplete(text);
+        setSuggestions(results);
+      } catch { setSuggestions([]); }
+    }, 300);
+  };
+
+  const selectSuggestion = (description: string) => {
+    if (activeField === 'origin') setOrigin(description);
+    else if (activeField === 'destination') setDestination(description);
+    setSuggestions([]);
+    setActiveField(null);
+  };
+
   const selectedVehicleObj = vehicles.find(v => v.id === selectedVehicle);
   const canCalculate = origin.trim().length > 1 && destination.trim().length > 1;
 
@@ -102,6 +129,7 @@ export default function CalculateScreen() {
           duration: String(result.route.duration),
           routeCoordinates: result.route.routeCoordinates || '',
           stops: JSON.stringify(result.stops || []),
+          nearbyRestAreas: JSON.stringify(result.nearbyRestAreas || []),
         },
       });
     } catch (err: any) {
@@ -139,7 +167,8 @@ export default function CalculateScreen() {
               placeholder="Kalkış noktası"
               placeholderTextColor="#9CA3AF"
               value={origin}
-              onChangeText={setOrigin}
+              onChangeText={(t) => handleTextChange(t, 'origin')}
+              onFocus={() => setActiveField('origin')}
               returnKeyType="next"
               autoCorrect={false}
             />
@@ -158,12 +187,31 @@ export default function CalculateScreen() {
               placeholder="Varış noktası"
               placeholderTextColor="#9CA3AF"
               value={destination}
-              onChangeText={setDestination}
+              onChangeText={(t) => handleTextChange(t, 'destination')}
+              onFocus={() => setActiveField('destination')}
               returnKeyType="done"
               autoCorrect={false}
             />
           </XStack>
         </Card>
+
+        {/* Autocomplete suggestions */}
+        {suggestions.length > 0 && activeField && (
+          <Card backgroundColor="white" borderRadius={16} marginHorizontal={16} marginTop={4} elevate style={styles.suggestionsCard}>
+            <FlatList
+              data={suggestions}
+              keyExtractor={(item) => item.placeId}
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: 200 }}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.suggestionRow} onPress={() => selectSuggestion(item.description)} activeOpacity={0.7}>
+                  <View style={styles.suggestionDot} />
+                  <Text fontSize={14} color="#1C1C1E" flex={1} numberOfLines={2}>{item.description}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </Card>
+        )}
       </KeyboardAvoidingView>
 
       {/* Bottom Panel */}
@@ -244,13 +292,17 @@ const styles = StyleSheet.create({
   dotRed: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#FF2D55' },
   routeLine: { width: 2, height: 16, backgroundColor: '#E5E7EB' },
   swapBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
-  bottomContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 16, zIndex: 10 },
+  bottomContainer: { position: 'absolute', bottom: 100, left: 0, right: 0, paddingHorizontal: 16, zIndex: 10 },
   vehicleSelector: { backgroundColor: 'white', borderRadius: 16, padding: 14, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
   carIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#EEF4FF', justifyContent: 'center', alignItems: 'center' },
   vehicleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  footer: { flexDirection: 'row', padding: 16, paddingBottom: 24, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E0E0E0', gap: 12 },
   calcBtn: { backgroundColor: '#1C1C1E', borderRadius: 18, paddingVertical: 18, paddingHorizontal: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#1C1C1E', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8 },
   calcBtnDisabled: { backgroundColor: '#9CA3AF', shadowOpacity: 0 },
   loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,8,8,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
   spinRing: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: 'rgba(255,255,255,0.12)', borderTopColor: 'white' },
   loadingTitle: { fontSize: 24, fontWeight: '800', color: 'white', letterSpacing: -0.5, marginTop: 28 },
+  suggestionsCard: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12, elevation: 8, zIndex: 20 },
+  suggestionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', gap: 12 },
+  suggestionDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB' },
 });

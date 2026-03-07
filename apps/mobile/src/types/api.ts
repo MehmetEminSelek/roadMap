@@ -45,7 +45,7 @@ export interface Route {
   distance: number;
   duration: number;
   tollCost: number;
-  tollDetails?: { name: string; highway: string; amount: number }[] | null;
+  tollDetails?: { name: string; highway: string; amount: number; lat: number; lng: number }[] | null;
   fuelCost: number;
   totalCost: number;
   aiFuelEstimate?: number;
@@ -118,7 +118,7 @@ export interface CreateRouteRequest {
 export interface RouteCalculationResult {
   route: Route;
   tollCost: number;
-  tollDetails?: { name: string; highway: string; amount: number }[] | null;
+  tollDetails?: { name: string; highway: string; amount: number; lat: number; lng: number }[] | null;
   fuelCost: number;
   totalCost: number;
   fuelDetails?: {
@@ -128,6 +128,7 @@ export interface RouteCalculationResult {
     confidence: number;
   };
   stops?: StopSuggestion[];
+  nearbyRestAreas?: NearbyRestArea[];
 }
 
 export interface StopSuggestion {
@@ -137,6 +138,15 @@ export interface StopSuggestion {
   lng: number;
   type: string;
   rating?: number;
+}
+
+export interface NearbyRestArea {
+  name: string;
+  lat: number;
+  lng: number;
+  type: string;
+  rating?: number;
+  vicinity?: string;
 }
 
 export interface CreateVehicleRequest {

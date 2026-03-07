@@ -23,6 +23,36 @@ export class GoogleMapsService {
     this.apiKey = this.configService.get<string>('googleMaps.apiKey') || '';
   }
 
+  async autocomplete(input: string): Promise<{ description: string; placeId: string }[]> {
+    if (!input || input.length < 2) return [];
+    try {
+      const response: AxiosResponse<any> = await firstValueFrom(
+        this.httpService.get(
+          `${this.apiUrl}/place/autocomplete/json`,
+          {
+            params: {
+              input,
+              key: this.apiKey,
+              language: 'tr',
+              components: 'country:tr',
+              types: 'geocode|establishment',
+            },
+          },
+        ),
+      );
+      if (response.data.status === 'OK' && response.data.predictions?.length > 0) {
+        return response.data.predictions.map((p: any) => ({
+          description: p.description,
+          placeId: p.place_id,
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Autocomplete error:', error);
+      return [];
+    }
+  }
+
   async geocode(address: string): Promise<GeocodingResult> {
     try {
       const response: AxiosResponse<any> = await firstValueFrom(

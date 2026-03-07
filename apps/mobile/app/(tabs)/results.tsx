@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Dimensions, LayoutAnimation, Platform, UIManager, Modal } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { MapPin, Car, Clock, Fuel, ChevronLeft, Heart, Navigation, ChevronDown, ChevronUp, Coffee, X, Star } from 'lucide-react-native';
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Polyline, Callout, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import { routeService } from '@/services/routeService';
 import { historyService } from '@/services/historyService';
-import type { Route } from '@/types/api';
+import type { Route, NearbyRestArea } from '@/types/api';
 
 const { width } = Dimensions.get('window');
 
@@ -29,6 +29,7 @@ const getGradientColors = (count: number): string[] => {
 export default function ResultsScreen() {
   const params = useLocalSearchParams();
   const mapRef = useRef<MapView | null>(null);
+  const previewMapRef = useRef<MapView | null>(null);
   const [route, setRoute] = useState<Route | null>(null);
   const [loading, setLoading] = useState(true);
   const [tollExpanded, setTollExpanded] = useState(false);
@@ -36,6 +37,7 @@ export default function ResultsScreen() {
   const [decodedCoords, setDecodedCoords] = useState<{ latitude: number, longitude: number }[]>([]);
   const [animatedCoords, setAnimatedCoords] = useState<{ latitude: number, longitude: number }[]>([]);
   const [stopSuggestions, setStopSuggestions] = useState<any[]>([]);
+  const [nearbyRestAreas, setNearbyRestAreas] = useState<NearbyRestArea[]>([]);
 
   useEffect(() => {
     loadResult();
@@ -55,6 +57,18 @@ export default function ResultsScreen() {
     };
     requestAnimationFrame(animate);
   }, [decodedCoords]);
+
+  // Auto-fit preview map to show complete route
+  useEffect(() => {
+    if (animatedCoords.length === decodedCoords.length && decodedCoords.length > 1) {
+      setTimeout(() => {
+        previewMapRef.current?.fitToCoordinates(decodedCoords, {
+          edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
+          animated: false,
+        });
+      }, 300);
+    }
+  }, [animatedCoords.length, decodedCoords.length]);
 
   const loadResult = async () => {
     const routeId = params.routeId as string;
@@ -96,6 +110,13 @@ export default function ResultsScreen() {
       } catch (e) { }
     }
 
+    // Parse nearby rest areas if passed via params
+    if (params.nearbyRestAreas) {
+      try {
+        setNearbyRestAreas(JSON.parse(params.nearbyRestAreas as string));
+      } catch (e) { }
+    }
+
     setLoading(false);
   };
 
@@ -131,15 +152,30 @@ export default function ResultsScreen() {
   };
 
   const decodePath = (encoded: string) => {
-    // Basic polyline decoder
     if (!encoded) return;
     try {
-      // If it's wrapped in quotes due to JSON.stringify, remove them
+      // Remove surrounding quotes if present
       let str = encoded;
       if (str.startsWith('"') && str.endsWith('"')) {
         str = str.substring(1, str.length - 1);
       }
 
+      // Try parsing as JSON array first (new format: [{lat, lng}, ...])
+      if (str.startsWith('[')) {
+        const parsed = JSON.parse(str);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Check if it's array of {lat, lng} objects
+          if (typeof parsed[0] === 'object' && 'lat' in parsed[0]) {
+            setDecodedCoords(parsed.map((p: any) => ({
+              latitude: p.lat,
+              longitude: p.lng,
+            })));
+            return;
+          }
+        }
+      }
+
+      // Fallback: decode as encoded polyline string (old format)
       let index = 0, lat = 0, lng = 0, coordinates = [];
       while (index < str.length) {
         let b, shift = 0, result = 0;
@@ -248,6 +284,7 @@ export default function ResultsScreen() {
         <TouchableOpacity activeOpacity={0.9} onPress={() => setMapExpanded(true)} style={styles.mapPreviewContainer}>
           <View pointerEvents="none" style={styles.mapPreviewWrapper}>
             <MapView
+              ref={previewMapRef}
               style={styles.mapPreview}
               provider={MAP_PROVIDER}
               initialRegion={
@@ -258,6 +295,14 @@ export default function ResultsScreen() {
                   longitudeDelta: Math.abs(route.originLng - route.destLng) * 1.5 || 2,
                 } : undefined
               }
+              onMapReady={() => {
+                if (decodedCoords.length > 1) {
+                  previewMapRef.current?.fitToCoordinates(decodedCoords, {
+                    edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
+                    animated: false,
+                  });
+                }
+              }}
               scrollEnabled={false}
               zoomEnabled={false}
               pitchEnabled={false}
@@ -282,6 +327,15 @@ export default function ResultsScreen() {
                   <View style={[styles.mapMarker, { backgroundColor: '#FF2D55' }]} />
                 </Marker>
               )}
+
+              {/* Toll Gate Markers */}
+              {route.tollDetails?.filter(t => t.lat && t.lng).map((toll, idx) => (
+                <Marker key={`toll-preview-${idx}`} coordinate={{ latitude: toll.lat, longitude: toll.lng }}>
+                  <View style={styles.tollMarker}>
+                    <Text style={styles.tollMarkerText}>₺</Text>
+                  </View>
+                </Marker>
+              ))}
 
               {/* Stop Suggestions */}
               {stopSuggestions.map((stop, idx) => (
@@ -382,15 +436,15 @@ export default function ResultsScreen() {
         </View>
 
         {/* Bottom padding for scrolling */}
-        <View style={{ height: 100 }} />
-
-        {/* Floating Action Button */}
-        <View style={styles.fabContainer}>
-          <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} onPress={() => router.push('/(tabs)/calculate')}>
-            <Text style={styles.primaryButtonText}>Yeni Rota Hesapla</Text>
-          </TouchableOpacity>
-        </View>
+        <View style={{ height: 200 }} />
       </ScrollView>
+
+      {/* Floating Action Button — outside ScrollView so it truly floats */}
+      <View style={styles.fabContainer}>
+        <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} onPress={() => router.push('/(tabs)/calculate')}>
+          <Text style={styles.primaryButtonText}>Yeni Rota Hesapla</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Fullscreen Interactive Map Modal */}
       <Modal visible={mapExpanded} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setMapExpanded(false)}>
@@ -428,11 +482,54 @@ export default function ResultsScreen() {
                 <View style={[styles.mapMarker, { backgroundColor: '#FF2D55' }]} />
               </Marker>
             )}
+
+            {/* Toll Gate Markers with Labels */}
+            {route.tollDetails?.filter(t => t.lat && t.lng).map((toll, idx) => (
+              <Marker key={`modal-toll-${idx}`} coordinate={{ latitude: toll.lat, longitude: toll.lng }}>
+                <View style={styles.tollMarkerLarge}>
+                  <Text style={styles.tollMarkerTextLarge}>₺</Text>
+                </View>
+                <Callout tooltip={false}>
+                  <View style={styles.calloutContainer}>
+                    <Text style={styles.calloutTitle}>{toll.name}</Text>
+                    <Text style={styles.calloutSubtitle}>{toll.highway} • ₺{toll.amount}</Text>
+                  </View>
+                </Callout>
+              </Marker>
+            ))}
+
+            {/* Selected Stop Suggestions */}
             {stopSuggestions.map((stop, idx) => (
               <Marker key={`modal-stop-${idx}`} coordinate={{ latitude: stop.lat, longitude: stop.lng }}>
                 <View style={styles.stopMarker}>
                   <Coffee size={14} color="#FFFFFF" />
                 </View>
+                <Callout tooltip={false}>
+                  <View style={styles.calloutContainer}>
+                    <Text style={styles.calloutTitle}>{stop.name}</Text>
+                    {stop.rating && <Text style={styles.calloutSubtitle}>⭐ {stop.rating.toFixed(1)}</Text>}
+                  </View>
+                </Callout>
+              </Marker>
+            ))}
+
+            {/* Nearby Rest Areas (small markers with names) */}
+            {nearbyRestAreas.map((area, idx) => (
+              <Marker
+                key={`rest-${idx}`}
+                coordinate={{ latitude: area.lat, longitude: area.lng }}
+                tracksViewChanges={false}
+              >
+                <View style={styles.restAreaMarker}>
+                  <Fuel size={10} color="#6B7280" />
+                </View>
+                <Callout tooltip={false}>
+                  <View style={styles.calloutContainer}>
+                    <Text style={styles.calloutTitle}>{area.name}</Text>
+                    {area.rating && <Text style={styles.calloutSubtitle}>⭐ {area.rating.toFixed(1)}</Text>}
+                    {area.vicinity && <Text style={styles.calloutSubtitle} numberOfLines={1}>{area.vicinity}</Text>}
+                  </View>
+                </Callout>
               </Marker>
             ))}
           </MapView>
@@ -855,7 +952,7 @@ const styles = StyleSheet.create({
   },
   fabContainer: {
     position: 'absolute',
-    bottom: 30,
+    bottom: 110,
     left: 20,
     right: 20,
     shadowColor: '#000',
@@ -876,5 +973,74 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     letterSpacing: -0.3,
+  },
+  // Toll gate markers
+  tollMarker: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FF9500',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  tollMarkerText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  tollMarkerLarge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FF9500',
+    borderWidth: 2.5,
+    borderColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  tollMarkerTextLarge: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  // Rest area markers (small, subtle)
+  restAreaMarker: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#E5E7EB',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Callout styles
+  calloutContainer: {
+    minWidth: 120,
+    maxWidth: 200,
+    padding: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+  },
+  calloutTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1C1C1E',
+    marginBottom: 2,
+  },
+  calloutSubtitle: {
+    fontSize: 11,
+    color: '#8E8E93',
+    fontWeight: '400',
   },
 });
