@@ -51,20 +51,36 @@ model Vehicle {
 }
 
 model VehicleMake {
-  id          String       @id @default(cuid())
-  name        String       // "Audi", "BMW", "Ford"
-  vehicles    VehicleModel[]
-
-  @@index([name])
+  id      String         @id @default(cuid())
+  name    String         @unique  // "Audi", "BMW", "Ford"
+  models  VehicleModel[]
 }
 
 model VehicleModel {
   id          String         @id @default(cuid())
   makeId      String
   name        String         // "A3", "Astra", "Corolla"
+  trims       VehicleTrim[]
   vehicleMake VehicleMake    @relation(fields: [makeId], references: [id], onDelete: Cascade)
 
+  @@unique([makeId, name])
   @@index([makeId])
+}
+
+// Yıl + yakıt tipi bazında araç varyantı (EPA dataset'ten doldurulur)
+model VehicleTrim {
+  id              String        @id @default(cuid())
+  modelId         String
+  year            Int
+  fuelType        FuelType
+  engineCapacity  Int?          // cc (displ * 1000)
+  transmission    Transmission?
+  fuelEconomyL100 Float?        // L/100km (235.214 / comb08_mpg)
+
+  vehicleModel    VehicleModel  @relation(fields: [modelId], references: [id], onDelete: Cascade)
+
+  @@unique([modelId, year, fuelType, engineCapacity])
+  @@index([modelId])
 }
 
 // ==========================================

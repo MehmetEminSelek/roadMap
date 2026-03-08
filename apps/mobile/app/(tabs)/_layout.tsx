@@ -1,12 +1,13 @@
 import { Tabs } from 'expo-router';
 import { Platform, TouchableOpacity, View, StyleSheet } from 'react-native';
 import { LayoutDashboard, Clock, Heart, User, Navigation } from 'lucide-react-native';
+import { C } from '@/theme';
 
 function CenterTabButton({ onPress }: { onPress?: (...args: any[]) => void }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.centerWrap}>
       <View style={styles.centerBtn}>
-        <Navigation size={26} color="white" />
+        <Navigation size={26} color="#090909" />
       </View>
     </TouchableOpacity>
   );
@@ -16,28 +17,29 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#1C1C1E',
-        tabBarInactiveTintColor: '#9AA0A6',
+        tabBarActiveTintColor: C.gold,
+        tabBarInactiveTintColor: C.textFaint,
         tabBarStyle: {
           position: 'absolute',
           bottom: Platform.OS === 'ios' ? 24 : 12,
           left: 20,
           right: 20,
-          backgroundColor: '#FFFFFF',
+          backgroundColor: C.surface,
           borderRadius: 24,
           height: 64,
           paddingBottom: 0,
           paddingTop: 8,
-          borderTopWidth: 0,
+          borderTopWidth: 1,
+          borderTopColor: C.border,
           shadowColor: '#000',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.12,
-          shadowRadius: 12,
-          elevation: 8,
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.5,
+          shadowRadius: 16,
+          elevation: 12,
         },
         tabBarLabelStyle: {
           fontSize: 11,
-          fontWeight: '500',
+          fontWeight: '600',
           marginTop: 2,
           marginBottom: 6,
         },
@@ -101,13 +103,13 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: C.gold,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#1C1C1E',
+    shadowColor: C.gold,
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
     elevation: 10,
   },
 });

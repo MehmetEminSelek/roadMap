@@ -14,6 +14,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { MapPin, Clock, Trash2, ChevronRight, Heart, Route as RouteIcon } from 'lucide-react-native';
 import { historyService } from '@/services/historyService';
 import type { Route as RouteType } from '@/types/api';
+import { C } from '@/theme';
 
 export default function HistoryScreen() {
   const [routes, setRoutes] = useState<RouteType[]>([]);
@@ -29,9 +30,7 @@ export default function HistoryScreen() {
   );
 
   const loadHistory = async (p: number = 1, reset: boolean = false) => {
-    if (reset) {
-      setLoading(true);
-    }
+    if (reset) setLoading(true);
     try {
       const result = await historyService.getAll(p, 20);
       const data = result?.data || [];
@@ -88,33 +87,30 @@ export default function HistoryScreen() {
     return hours > 0 ? `${hours}s ${minutes}dk` : `${minutes}dk`;
   };
 
-  const formatDistance = (meters: number): string => {
-    return `${(meters / 1000).toFixed(0)} km`;
-  };
+  const formatDistance = (meters: number): string => `${(meters / 1000).toFixed(0)} km`;
 
-  const formatCost = (amount: number) => {
-    return `₺${Number(amount).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
-  };
+  const formatCost = (amount: number) =>
+    `₺${Number(amount).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 
-  const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString('tr-TR', {
+  const formatDate = (date: string) =>
+    new Date(date).toLocaleDateString('tr-TR', {
       day: 'numeric',
       month: 'short',
       hour: '2-digit',
       minute: '2-digit',
     });
-  };
 
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color="#0A84FF" />
+        <ActivityIndicator size="large" color={C.gold} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Geçmiş Yolculuklar</Text>
         <Text style={styles.subtitle}>{routes.length} rota bulundu</Text>
@@ -123,18 +119,12 @@ export default function HistoryScreen() {
       {routes.length === 0 ? (
         <View style={styles.emptyContainer}>
           <View style={styles.emptyIconBox}>
-            <RouteIcon size={48} color="#8E8E93" strokeWidth={1.5} />
+            <RouteIcon size={40} color={C.textSoft} strokeWidth={1.5} />
           </View>
           <Text style={styles.emptyTitle}>Henüz rota yok</Text>
           <Text style={styles.emptySubtitle}>
             Hesapladığın tüm rotalar burada otomatik olarak kaydedilecek.
           </Text>
-          <TouchableOpacity
-            style={styles.emptyButton}
-            onPress={() => router.push('/search')}
-          >
-            <Text style={styles.emptyButtonText}>Yeni Rota Hesapla</Text>
-          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -143,7 +133,11 @@ export default function HistoryScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#0A84FF" />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={C.gold}
+            />
           }
           onEndReached={() => {
             if (hasMore) loadHistory(page + 1, false);
@@ -151,26 +145,13 @@ export default function HistoryScreen() {
           onEndReachedThreshold={0.3}
           renderItem={({ item }) => (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={0.75}
               style={styles.routeCard}
               onPress={() =>
-                router.push({
-                  pathname: '/(tabs)/results',
-                  params: {
-                    routeId: item.id,
-                    origin: item.origin,
-                    destination: item.destination,
-                    distance: String(item.distance),
-                    duration: String(item.duration),
-                    tollCost: String(item.tollCost),
-                    fuelCost: String(item.fuelCost),
-                    totalCost: String(item.totalCost),
-                    routeCoordinates: item.routeCoordinates || '',
-                    tollDetails: JSON.stringify(item.tollDetails || []),
-                  },
-                })
+                router.push({ pathname: '/route/[id]', params: { id: item.id } })
               }
             >
+              {/* Route title */}
               <View style={styles.routeHeader}>
                 <View style={styles.routeLocations}>
                   <Text style={styles.routeOrigin} numberOfLines={1}>{item.origin}</Text>
@@ -178,39 +159,44 @@ export default function HistoryScreen() {
                   <Text style={styles.routeDest} numberOfLines={1}>{item.destination}</Text>
                 </View>
                 <View style={styles.chevronWrapper}>
-                  <ChevronRight size={18} color="#C7C7CC" />
+                  <ChevronRight size={16} color={C.textSoft} />
                 </View>
               </View>
 
+              {/* Stats row */}
               <View style={styles.routeDetails}>
                 <View style={styles.detailChip}>
-                  <MapPin size={14} color="#8E8E93" />
+                  <MapPin size={13} color={C.textSoft} />
                   <Text style={styles.detailText}>{formatDistance(item.distance)}</Text>
                 </View>
-                <View style={[styles.detailChip, { marginLeft: 12 }]}>
-                  <Clock size={14} color="#8E8E93" />
+                <View style={[styles.detailChip, { marginLeft: 10 }]}>
+                  <Clock size={13} color={C.textSoft} />
                   <Text style={styles.detailText}>{formatDuration(item.duration)}</Text>
                 </View>
                 <View style={{ flex: 1 }} />
                 <Text style={styles.totalCost}>{formatCost(item.totalCost)}</Text>
               </View>
 
+              {/* Divider */}
               <View style={styles.divider} />
 
+              {/* Footer */}
               <View style={styles.routeFooter}>
                 <Text style={styles.routeDate}>{formatDate(item.createdAt)}</Text>
                 <View style={styles.routeActions}>
                   <TouchableOpacity
                     style={styles.actionButton}
                     onPress={() => handleFavorite(item)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    <Heart size={20} color="#FF2D55" />
+                    <Heart size={18} color="#FF2D55" />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.actionButton, { marginLeft: 16 }]}
                     onPress={() => handleDelete(item.id)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    <Trash2 size={20} color="#FF3B30" />
+                    <Trash2 size={18} color={C.danger} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -225,84 +211,92 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F2F7', // iOS Light Gray Background
+    backgroundColor: C.bg,
   },
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
   },
+
+  // ── Header
   header: {
     paddingTop: Platform.OS === 'ios' ? 64 : 48,
     paddingHorizontal: 20,
     paddingBottom: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: C.surface,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
+    borderBottomColor: C.border,
   },
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#1C1C1E',
+    color: C.text,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 15,
-    color: '#8E8E93',
+    fontSize: 14,
+    color: C.textSoft,
     fontWeight: '500',
-    marginTop: 6,
+    marginTop: 4,
   },
+
+  // ── List
   listContent: {
-    padding: 20,
-    paddingBottom: 120, // Tab bar padding
+    padding: 16,
+    paddingBottom: 120,
   },
+
+  // ── Route Card
   routeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 16,
-    elevation: 3,
+    backgroundColor: C.card,
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: C.border,
   },
   routeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   routeLocations: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    paddingRight: 16,
+    paddingRight: 12,
+    flexShrink: 1,
   },
   routeOrigin: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#1C1C1E',
+    color: C.text,
     flexShrink: 1,
   },
   routeArrow: {
-    fontSize: 15,
-    color: '#8E8E93',
+    fontSize: 14,
+    color: C.textSoft,
     marginHorizontal: 8,
   },
   routeDest: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#1C1C1E',
+    color: C.text,
     flexShrink: 1,
   },
   chevronWrapper: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F2F2F7',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: C.surface,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
   },
+
+  // ── Detail chips
   routeDetails: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -310,27 +304,31 @@ const styles = StyleSheet.create({
   detailChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F2F2F7',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    backgroundColor: C.surface,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: C.border,
   },
   detailText: {
-    fontSize: 13,
-    color: '#1C1C1E',
+    fontSize: 12,
+    color: C.text,
     fontWeight: '500',
-    marginLeft: 6,
+    marginLeft: 5,
   },
   totalCost: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0A84FF',
-    letterSpacing: -0.5,
+    fontSize: 19,
+    fontWeight: '800',
+    color: C.gold,
+    letterSpacing: -0.4,
   },
+
+  // ── Footer
   divider: {
     height: 1,
-    backgroundColor: '#F2F2F7',
-    marginVertical: 16,
+    backgroundColor: C.borderMuted,
+    marginVertical: 14,
   },
   routeFooter: {
     flexDirection: 'row',
@@ -338,16 +336,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   routeDate: {
-    fontSize: 13,
-    color: '#8E8E93',
+    fontSize: 12,
+    color: C.textSoft,
     fontWeight: '500',
   },
   routeActions: {
     flexDirection: 'row',
   },
   actionButton: {
-    padding: 6,
+    padding: 4,
   },
+
+  // ── Empty
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -355,10 +355,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   emptyIconBox: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: '#E5E5EA',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
@@ -366,25 +368,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1C1C1E',
-    marginBottom: 12,
+    color: C.text,
+    marginBottom: 10,
   },
   emptySubtitle: {
-    fontSize: 15,
-    color: '#8E8E93',
+    fontSize: 14,
+    color: C.textSoft,
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 32,
-  },
-  emptyButton: {
-    backgroundColor: '#1C1C1E',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    borderRadius: 20,
-  },
-  emptyButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

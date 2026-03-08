@@ -88,6 +88,15 @@ export interface VehicleModel {
   name: string;
 }
 
+export interface VehicleTrim {
+  id: string;
+  year: number;
+  fuelType: FuelType;
+  engineCapacity: number | null;
+  transmission: Transmission | null;
+  fuelEconomyL100: number | null;
+}
+
 // ==========================================
 // API Request/Response Types
 // ==========================================

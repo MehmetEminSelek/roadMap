@@ -24,6 +24,11 @@ export class VehiclesController {
     return this.vehiclesService.getVehicleModels(brandId);
   }
 
+  @Get('models/:modelId/trims')
+  getTrims(@Param('modelId') modelId: string) {
+    return this.vehiclesService.getVehicleTrims(modelId);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Post()
   create(@Body() createVehicleDto: CreateVehicleDto, @Request() req: UserRequest) {

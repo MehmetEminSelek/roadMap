@@ -1,5 +1,5 @@
 import apiClient from './apiClient';
-import type { Vehicle, CreateVehicleRequest, Brand, VehicleModel } from '@/types/api';
+import type { Vehicle, CreateVehicleRequest, Brand, VehicleModel, VehicleTrim } from '@/types/api';
 
 export const vehicleService = {
   async getAll(): Promise<Vehicle[]> {
@@ -33,6 +33,11 @@ export const vehicleService = {
 
   async getModels(brandId: string): Promise<VehicleModel[]> {
     const response = await apiClient.get<VehicleModel[]>(`/vehicles/brands/${brandId}/models`);
+    return response.data;
+  },
+
+  async getTrims(modelId: string): Promise<VehicleTrim[]> {
+    const response = await apiClient.get<VehicleTrim[]>(`/vehicles/models/${modelId}/trims`);
     return response.data;
   },
 };

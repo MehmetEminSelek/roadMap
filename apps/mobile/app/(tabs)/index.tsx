@@ -8,7 +8,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import MapView, { PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import {
@@ -80,7 +80,12 @@ export default function DashboardScreen() {
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+  // Ekrana her odaklanıldığında yenile (silme/ekleme sonrası güncel veri gelsin)
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -269,43 +274,6 @@ export default function DashboardScreen() {
               </Text>
             </Card>
           )}
-        </YStack>
-
-        {/* Quick Calculate CTA */}
-        <YStack paddingHorizontal={16} marginTop={16}>
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => router.navigate('/(tabs)/calculate')}
-          >
-            <Card
-              backgroundColor="#1C1C1E"
-              borderRadius={20}
-              padding={20}
-              animation="fast"
-              pressStyle={{ scale: 0.97 }}
-            >
-              <XStack justifyContent="space-between" alignItems="center">
-                <XStack alignItems="center" gap={14}>
-                  <YStack
-                    width={48} height={48} borderRadius={16}
-                    backgroundColor="#2563EB"
-                    justifyContent="center" alignItems="center"
-                  >
-                    <Navigation size={22} color="white" />
-                  </YStack>
-                  <YStack>
-                    <Text color="white" fontSize={17} fontWeight="700" letterSpacing={-0.3}>
-                      Hızlı Hesapla
-                    </Text>
-                    <Text color="#6B7280" fontSize={13} marginTop={2}>
-                      Yeni rota maliyeti
-                    </Text>
-                  </YStack>
-                </XStack>
-                <ChevronRight size={22} color="#6B7280" />
-              </XStack>
-            </Card>
-          </TouchableOpacity>
         </YStack>
 
         {/* Recent Routes */}

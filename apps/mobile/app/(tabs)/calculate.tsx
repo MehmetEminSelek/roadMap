@@ -215,7 +215,7 @@ export default function CalculateScreen() {
       </KeyboardAvoidingView>
 
       {/* Bottom Panel */}
-      <View style={[styles.bottomContainer, { paddingBottom: insets.bottom + 16 }]}>
+      <View style={styles.bottomContainer}>
         {vehiclePanelOpen && (
           <Card backgroundColor="white" borderRadius={16} marginBottom={10} elevate>
             <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled showsVerticalScrollIndicator={false}>
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
   dotRed: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#FF2D55' },
   routeLine: { width: 2, height: 16, backgroundColor: '#E5E7EB' },
   swapBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
-  bottomContainer: { position: 'absolute', bottom: 100, left: 0, right: 0, paddingHorizontal: 16, zIndex: 10 },
+  bottomContainer: { position: 'absolute', bottom: Platform.OS === 'ios' ? 100 : 88, left: 0, right: 0, paddingHorizontal: 16, paddingBottom: 8, zIndex: 10 },
   vehicleSelector: { backgroundColor: 'white', borderRadius: 16, padding: 14, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
   carIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#EEF4FF', justifyContent: 'center', alignItems: 'center' },
   vehicleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },

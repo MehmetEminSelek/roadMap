@@ -11,9 +11,10 @@ import {
   Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { Heart, Trash2, Route as RouteIcon, Navigation } from 'lucide-react-native';
+import { Heart, Trash2, Navigation } from 'lucide-react-native';
 import { favoritesService } from '@/services/favoritesService';
 import type { FavoriteRoute } from '@/types/api';
+import { C } from '@/theme';
 
 export default function FavoritesScreen() {
   const [favorites, setFavorites] = useState<FavoriteRoute[]>([]);
@@ -61,19 +62,22 @@ export default function FavoritesScreen() {
     ]);
   };
 
-  const formatCost = (amount: number) => `₺${Number(amount).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
+  const formatCost = (amount: number) =>
+    `₺${Number(amount).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
+
   const formatDistance = (meters: number) => `${(meters / 1000).toFixed(0)} km`;
 
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color="#0A84FF" />
+        <ActivityIndicator size="large" color={C.gold} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Favori Rotalar</Text>
         <Text style={styles.subtitle}>{favorites.length} kayıtlı rota</Text>
@@ -82,11 +86,11 @@ export default function FavoritesScreen() {
       {favorites.length === 0 ? (
         <View style={styles.emptyContainer}>
           <View style={styles.emptyIconBox}>
-            <Heart size={48} color="#FF2D55" strokeWidth={1.5} />
+            <Heart size={40} color="#FF2D55" strokeWidth={1.5} />
           </View>
           <Text style={styles.emptyTitle}>Favori rotanız yok</Text>
           <Text style={styles.emptySubtitle}>
-            Sık kullandığınız veya sevdiğiniz rotaları hesaplama sonucundan buraya ekleyebilirsiniz.
+            Sık kullandığınız rotaları hesaplama sonucundan favorilere ekleyebilirsiniz.
           </Text>
         </View>
       ) : (
@@ -96,13 +100,14 @@ export default function FavoritesScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#0A84FF" />
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.gold} />
           }
           renderItem={({ item }) => (
             <View style={styles.favoriteCard}>
+              {/* Card header: name + remove button */}
               <View style={styles.cardHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 16 }}>
-                  <Heart size={20} color="#FF2D55" fill="#FF2D55" />
+                <View style={styles.namePill}>
+                  <Heart size={14} color="#FF2D55" fill="#FF2D55" />
                   <Text style={styles.favoriteName} numberOfLines={1}>{item.name}</Text>
                 </View>
                 <TouchableOpacity
@@ -110,27 +115,34 @@ export default function FavoritesScreen() {
                   onPress={() => handleRemove(item.id)}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Trash2 size={18} color="#FF3B30" />
+                  <Trash2 size={16} color={C.danger} />
                 </TouchableOpacity>
               </View>
 
+              {/* Route info */}
               {item.route && (
                 <View style={styles.routeInfoCard}>
-                  <View style={styles.routeHeader}>
-                    <View style={styles.routeDot} />
+                  {/* Origin */}
+                  <View style={styles.routeRow}>
+                    <View style={[styles.routeDot, { backgroundColor: C.success }]} />
                     <Text style={styles.routeText} numberOfLines={1}>{item.route.origin}</Text>
                   </View>
-                  <View style={styles.routeLine} />
-                  <View style={styles.routeHeader}>
-                    <View style={[styles.routeDot, { backgroundColor: '#0A84FF', borderColor: '#0A84FF' }]} />
+                  {/* Connector */}
+                  <View style={styles.routeConnector}>
+                    <View style={styles.routeLine} />
+                  </View>
+                  {/* Destination */}
+                  <View style={styles.routeRow}>
+                    <View style={[styles.routeDot, { backgroundColor: C.danger }]} />
                     <Text style={styles.routeText} numberOfLines={1}>{item.route.destination}</Text>
                   </View>
 
                   <View style={styles.divider} />
 
+                  {/* Stats */}
                   <View style={styles.routeStats}>
                     <View style={styles.statChip}>
-                      <Navigation size={14} color="#8E8E93" />
+                      <Navigation size={13} color={C.textSoft} />
                       <Text style={styles.statText}>{formatDistance(item.route.distance)}</Text>
                     </View>
                     <View style={{ flex: 1 }} />
@@ -149,103 +161,116 @@ export default function FavoritesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: C.bg,
   },
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
   },
+
+  // ── Header
   header: {
     paddingTop: Platform.OS === 'ios' ? 64 : 48,
     paddingHorizontal: 20,
     paddingBottom: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: C.surface,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
+    borderBottomColor: C.border,
   },
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#1C1C1E',
+    color: C.text,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 15,
-    color: '#8E8E93',
+    fontSize: 14,
+    color: C.textSoft,
     fontWeight: '500',
-    marginTop: 6,
+    marginTop: 4,
   },
+
+  // ── List
   listContent: {
-    padding: 20,
-    paddingBottom: 120, // Tab bar padding
+    padding: 16,
+    paddingBottom: 120,
   },
+
+  // ── Favorite Card
   favoriteCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 16,
-    elevation: 3,
+    backgroundColor: C.card,
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: C.border,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
+  },
+  namePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    paddingRight: 12,
   },
   favoriteName: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#1C1C1E',
-    marginLeft: 10,
+    color: C.text,
     flexShrink: 1,
   },
   removeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#FFF0F0',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: C.dangerSubtle,
     justifyContent: 'center',
     alignItems: 'center',
   },
+
+  // ── Route info card (nested)
   routeInfoCard: {
-    backgroundColor: '#F2F2F7',
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: C.surface,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: C.borderMuted,
   },
-  routeHeader: {
+  routeRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
   routeDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    borderWidth: 2,
-    borderColor: '#C7C7CC',
-    backgroundColor: '#FFFFFF',
-    marginRight: 12,
+  },
+  routeConnector: {
+    paddingLeft: 4,
+    paddingVertical: 3,
   },
   routeLine: {
     width: 2,
     height: 16,
-    backgroundColor: '#E5E5EA',
-    marginLeft: 4,
-    marginVertical: 4,
+    backgroundColor: C.border,
+    marginLeft: 0,
   },
   routeText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '500',
-    color: '#1C1C1E',
+    color: C.text,
     flex: 1,
   },
   divider: {
     height: 1,
-    backgroundColor: '#E5E5EA',
-    marginVertical: 16,
+    backgroundColor: C.border,
+    marginVertical: 12,
   },
   routeStats: {
     flexDirection: 'row',
@@ -254,23 +279,27 @@ const styles = StyleSheet.create({
   statChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    gap: 5,
+    backgroundColor: C.card,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
+    borderWidth: 1,
+    borderColor: C.border,
   },
   statText: {
-    fontSize: 13,
-    color: '#1C1C1E',
+    fontSize: 12,
+    color: C.text,
     fontWeight: '500',
-    marginLeft: 6,
   },
   statCost: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#1C1C1E',
-    letterSpacing: -0.5,
+    fontWeight: '800',
+    color: C.gold,
+    letterSpacing: -0.4,
   },
+
+  // ── Empty
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -278,10 +307,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   emptyIconBox: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: '#FFF0F0',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
@@ -289,12 +320,12 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1C1C1E',
-    marginBottom: 12,
+    color: C.text,
+    marginBottom: 10,
   },
   emptySubtitle: {
-    fontSize: 15,
-    color: '#8E8E93',
+    fontSize: 14,
+    color: C.textSoft,
     textAlign: 'center',
     lineHeight: 22,
   },

@@ -37,11 +37,39 @@ export class RoutesService {
     // 3. Calculate toll cost
     const tollData = await this.tolls.calculateTollCost(route, vehicle);
 
-    // 4. Predict fuel cost using AI
+    // 4. Look up EPA fuel economy data for this vehicle (if available)
+    const distanceKm = leg.distance.value / 1000;
+    let epaFuelEconomyL100: number | undefined;
+
+    if (vehicle) {
+      const epaMatch = await this.prisma.vehicleTrim.findFirst({
+        where: {
+          vehicleModel: {
+            name: vehicle.model,
+            vehicleMake: { name: vehicle.brand },
+          },
+          fuelType: vehicle.fuelType,
+        },
+        orderBy: { year: 'desc' }, // en güncel trim
+        select: { fuelEconomyL100: true },
+      });
+
+      if (epaMatch?.fuelEconomyL100) {
+        epaFuelEconomyL100 = epaMatch.fuelEconomyL100;
+        console.log(`📊 EPA verisi bulundu: ${vehicle.brand} ${vehicle.model} → ${epaFuelEconomyL100} L/100km`);
+      } else {
+        console.log(`⚠️ EPA verisi bulunamadı: ${vehicle.brand} ${vehicle.model} (${vehicle.fuelType}), AI tahmini kullanılacak`);
+      }
+    }
+
+    // 5. Predict fuel cost (EPA verisi varsa AI bypass edilir, yoksa AI kullanılır)
     const fuelResult = await this.fuelAi.calculateFuelCost({
-      distanceKm: leg.distance.value / 1000,
+      distanceKm,
       durationSeconds: leg.duration.value,
       hasClimateControl: createRouteDto.hasClimateControl,
+      // EPA L/100km → toplam litre (bu mesafe için)
+      averageConsumption: epaFuelEconomyL100 ? (distanceKm * epaFuelEconomyL100) / 100 : undefined,
+      vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
     });
 
     // 5. Calculate total cost

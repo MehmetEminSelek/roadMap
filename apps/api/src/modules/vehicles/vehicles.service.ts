@@ -93,6 +93,45 @@ export class VehiclesService {
     });
   }
 
+  async getVehicleTrims(modelId: string): Promise<{
+    id: string;
+    year: number;
+    fuelType: string;
+    engineCapacity: number | null;
+    transmission: string | null;
+    fuelEconomyL100: number | null;
+  }[]> {
+    const model = await this.prisma.vehicleModel.findUnique({
+      where: { id: modelId },
+    });
+
+    if (!model) {
+      throw new NotFoundException('Vehicle model not found');
+    }
+
+    const trims = await this.prisma.vehicleTrim.findMany({
+      where: { modelId },
+      orderBy: [{ year: 'desc' }, { fuelType: 'asc' }],
+      select: {
+        id: true,
+        year: true,
+        fuelType: true,
+        engineCapacity: true,
+        transmission: true,
+        fuelEconomyL100: true,
+      },
+    });
+
+    // Deduplicate: keep only the latest year for each fuelType + engineCapacity combo
+    const seen = new Set<string>();
+    return trims.filter((t) => {
+      const key = `${t.fuelType}_${t.engineCapacity ?? 'null'}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   async getVehicleMakesAndModels(): Promise<{ id: string; name: string; models: { id: string; name: string }[] }[]> {
     const makes = await this.prisma.vehicleMake.findMany({
       orderBy: {
