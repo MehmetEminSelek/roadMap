@@ -1,6 +1,6 @@
 export default {
   expo: {
-    name: "RoadMap",
+    name: "Masrafım",
     slug: "roadmap",
     scheme: "roadmap",
     version: "1.0.0",

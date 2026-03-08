@@ -1,8 +1,20 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ChevronLeft, Check } from 'lucide-react-native';
 import { vehicleService } from '@/services/vehicleService';
 import type { Vehicle, FuelType, Transmission } from '@/types/api';
+import { C } from '@/theme';
 
 const FUEL_TYPES: { label: string; value: FuelType }[] = [
   { label: 'Benzin', value: 'PETROL' },
@@ -21,6 +33,7 @@ const TRANSMISSIONS: { label: string; value: Transmission }[] = [
 
 export default function EditVehicleScreen() {
   const { id } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [name, setName] = useState('');
   const [fuelType, setFuelType] = useState<FuelType>('PETROL');
@@ -31,9 +44,7 @@ export default function EditVehicleScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    loadVehicle();
-  }, [id]);
+  useEffect(() => { loadVehicle(); }, [id]);
 
   const loadVehicle = async () => {
     try {
@@ -58,7 +69,6 @@ export default function EditVehicleScreen() {
       Alert.alert('Hata', 'Araç adını girin.');
       return;
     }
-
     setSaving(true);
     try {
       await vehicleService.update(id as string, {
@@ -79,109 +89,295 @@ export default function EditVehicleScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color="#007AFF" />
+      <View style={[styles.fill, styles.centered]}>
+        <ActivityIndicator size="large" color={C.gold} />
       </View>
     );
   }
 
+  const selectedFuelColor = C.fuel[fuelType] || C.gold;
+
   return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Araç Adı</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-        />
+    <View style={styles.fill}>
+      {/* ── Header ───────────────────────────────── */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+          <ChevronLeft size={24} color={C.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Aracı Düzenle</Text>
+        <View style={{ width: 40 }} />
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.label}>Marka / Model</Text>
-        <Text style={styles.readOnly}>{vehicle?.brand} {vehicle?.model}</Text>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Yakıt Tipi</Text>
-        <View style={styles.chipGrid}>
-          {FUEL_TYPES.map((ft) => (
-            <TouchableOpacity
-              key={ft.value}
-              style={[styles.chip, fuelType === ft.value && styles.chipSelected]}
-              onPress={() => setFuelType(ft.value)}
-            >
-              <Text style={[styles.chipText, fuelType === ft.value && styles.chipTextSelected]}>
-                {ft.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Araç Adı ─────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>ARAÇ ADI</Text>
+          <TextInput
+            style={styles.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="örn. Benim Arabam"
+            placeholderTextColor={C.textSoft}
+            selectionColor={C.gold}
+          />
         </View>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Vites</Text>
-        <View style={styles.chipGrid}>
-          {TRANSMISSIONS.map((t) => (
-            <TouchableOpacity
-              key={t.value}
-              style={[styles.chip, transmission === t.value && styles.chipSelected]}
-              onPress={() => setTransmission(t.value)}
-            >
-              <Text style={[styles.chipText, transmission === t.value && styles.chipTextSelected]}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Teknik Bilgiler</Text>
-        <View style={styles.row}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Motor Gücü (HP)</Text>
-            <TextInput style={styles.input} value={enginePower} onChangeText={setEnginePower} keyboardType="numeric" />
-          </View>
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Motor Hacmi (cc)</Text>
-            <TextInput style={styles.input} value={engineCapacity} onChangeText={setEngineCapacity} keyboardType="numeric" />
+        {/* ── Marka / Model (read-only) ─────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>MARKA / MODEL</Text>
+          <View style={styles.readOnlyBox}>
+            <Text style={styles.readOnlyText}>{vehicle?.brand} {vehicle?.model}</Text>
           </View>
         </View>
-        <Text style={styles.inputLabel}>Ağırlık (kg)</Text>
-        <TextInput style={styles.input} value={weight} onChangeText={setWeight} keyboardType="numeric" />
-      </View>
 
-      <View style={styles.footer}>
+        {/* ── Yakıt Tipi ───────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>YAKIT TİPİ</Text>
+          <View style={styles.chipGrid}>
+            {FUEL_TYPES.map((ft) => {
+              const active = fuelType === ft.value;
+              const color = C.fuel[ft.value] || C.gold;
+              return (
+                <TouchableOpacity
+                  key={ft.value}
+                  style={[
+                    styles.chip,
+                    active && { backgroundColor: `${color}18`, borderColor: color },
+                  ]}
+                  onPress={() => setFuelType(ft.value)}
+                >
+                  {active && (
+                    <View style={[styles.chipDot, { backgroundColor: color }]} />
+                  )}
+                  <Text style={[styles.chipText, active && { color, fontWeight: '700' }]}>
+                    {ft.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* ── Vites ────────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>VİTES</Text>
+          <View style={styles.chipGrid}>
+            {TRANSMISSIONS.map((t) => {
+              const active = transmission === t.value;
+              return (
+                <TouchableOpacity
+                  key={t.value}
+                  style={[
+                    styles.chip,
+                    active && { backgroundColor: C.goldSubtle, borderColor: C.gold },
+                  ]}
+                  onPress={() => setTransmission(t.value)}
+                >
+                  {active && (
+                    <View style={[styles.chipDot, { backgroundColor: C.gold }]} />
+                  )}
+                  <Text style={[styles.chipText, active && { color: C.gold, fontWeight: '700' }]}>
+                    {t.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* ── Teknik Bilgiler ───────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>TEKNİK BİLGİLER</Text>
+          <View style={styles.row}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Motor Gücü (HP)</Text>
+              <TextInput
+                style={styles.input}
+                value={enginePower}
+                onChangeText={setEnginePower}
+                keyboardType="numeric"
+                placeholder="150"
+                placeholderTextColor={C.textSoft}
+                selectionColor={C.gold}
+              />
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Motor Hacmi (cc)</Text>
+              <TextInput
+                style={styles.input}
+                value={engineCapacity}
+                onChangeText={setEngineCapacity}
+                keyboardType="numeric"
+                placeholder="1600"
+                placeholderTextColor={C.textSoft}
+                selectionColor={C.gold}
+              />
+            </View>
+          </View>
+          <Text style={[styles.inputLabel, { marginTop: 12 }]}>Ağırlık (kg)</Text>
+          <TextInput
+            style={styles.input}
+            value={weight}
+            onChangeText={setWeight}
+            keyboardType="numeric"
+            placeholder="1300"
+            placeholderTextColor={C.textSoft}
+            selectionColor={C.gold}
+          />
+        </View>
+
+        {/* ── Save Button ───────────────────────── */}
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.saveButtonDisabled]}
           onPress={handleSave}
           disabled={saving}
+          activeOpacity={0.85}
         >
-          {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveButtonText}>Güncelle</Text>}
+          {saving ? (
+            <ActivityIndicator color="#090909" />
+          ) : (
+            <>
+              <Check size={18} color="#090909" />
+              <Text style={styles.saveButtonText}>Güncelle</Text>
+            </>
+          )}
         </TouchableOpacity>
-      </View>
-    </ScrollView>
+
+        <View style={{ height: insets.bottom + 24 }} />
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F5F7' },
-  centered: { justifyContent: 'center', alignItems: 'center' },
-  section: { padding: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#1C1C1E', marginBottom: 12 },
-  label: { fontSize: 13, color: '#8E8E93', marginBottom: 6 },
-  readOnly: { fontSize: 16, color: '#1C1C1E', fontWeight: '500', backgroundColor: '#F0F0F5', padding: 16, borderRadius: 12 },
-  chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E0E0E0' },
-  chipSelected: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  chipText: { fontSize: 14, color: '#1C1C1E' },
-  chipTextSelected: { color: '#FFFFFF', fontWeight: '600' },
-  input: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, fontSize: 16, color: '#1C1C1E', borderWidth: 1, borderColor: '#E0E0E0' },
-  inputLabel: { fontSize: 13, color: '#8E8E93', marginBottom: 6, marginTop: 8 },
-  row: { flexDirection: 'row', gap: 12 },
+  fill: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 16 },
+
+  // ── Header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: C.surface,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.text,
+  },
+  iconBtn: { padding: 8 },
+
+  // ── Sections
+  section: {
+    marginBottom: 24,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.textSoft,
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+
+  // ── Input
+  input: {
+    backgroundColor: C.card,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: C.text,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  inputLabel: {
+    fontSize: 12,
+    color: C.textSoft,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 12,
+  },
   inputGroup: { flex: 1 },
-  footer: { padding: 16, paddingBottom: 40 },
-  saveButton: { backgroundColor: '#007AFF', borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
-  saveButtonDisabled: { opacity: 0.7 },
-  saveButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+
+  // ── Read-only
+  readOnlyBox: {
+    backgroundColor: C.surface,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.borderMuted,
+  },
+  readOnlyText: {
+    fontSize: 16,
+    color: C.textSoft,
+    fontWeight: '500',
+  },
+
+  // ── Chips
+  chipGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  chipDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  chipText: {
+    fontSize: 14,
+    color: C.textSoft,
+    fontWeight: '500',
+  },
+
+  // ── Save Button
+  saveButton: {
+    backgroundColor: C.gold,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    color: '#090909',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
 });
