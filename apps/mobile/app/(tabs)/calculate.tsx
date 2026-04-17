@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   TextInput,
@@ -20,6 +20,8 @@ import { ArrowUpDown, ChevronRight, CheckCircle2, Car } from 'lucide-react-nativ
 import { vehicleService } from '@/services/vehicleService';
 import { routeService } from '@/services/routeService';
 import type { Vehicle } from '@/types/api';
+import { useAutocomplete } from '@/queries/autocomplete';
+import { SuggestionRow } from '@/components/SuggestionRow';
 
 const MAP_PROVIDER = Platform.OS === 'ios' ? PROVIDER_DEFAULT : PROVIDER_GOOGLE;
 
@@ -38,14 +40,28 @@ export default function CalculateScreen() {
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [vehiclePanelOpen, setVehiclePanelOpen] = useState(false);
   const [calculating, setCalculating] = useState(false);
-  const [suggestions, setSuggestions] = useState<{ description: string; placeId: string }[]>([]);
   const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [debouncedInput, setDebouncedInput] = useState('');
+  const inputRef = useRef<string>('');
 
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const spinRef = useRef<Animated.CompositeAnimation | null>(null);
   const pulseRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  // Debounce input for autocomplete query
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (inputRef.current.length >= 2) {
+        setDebouncedInput(inputRef.current);
+      } else {
+        setDebouncedInput('');
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [origin, destination, activeField]);
+
+  const { data: suggestions = [], isLoading } = useAutocomplete(debouncedInput);
 
   useEffect(() => {
     if (calculating) {
@@ -81,30 +97,39 @@ export default function CalculateScreen() {
   };
 
   const handleTextChange = (text: string, field: 'origin' | 'destination') => {
-    if (field === 'origin') setOrigin(text);
-    else setDestination(text);
+    if (field === 'origin') {
+      setOrigin(text);
+      inputRef.current = text;
+    } else {
+      setDestination(text);
+      inputRef.current = text;
+    }
     setActiveField(field);
-
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (text.length < 2) { setSuggestions([]); return; }
-
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const results = await routeService.autocomplete(text);
-        setSuggestions(results);
-      } catch { setSuggestions([]); }
-    }, 300);
   };
 
   const selectSuggestion = (description: string) => {
-    if (activeField === 'origin') setOrigin(description);
-    else if (activeField === 'destination') setDestination(description);
-    setSuggestions([]);
+    if (activeField === 'origin') {
+      setOrigin(description);
+      inputRef.current = description;
+    } else if (activeField === 'destination') {
+      setDestination(description);
+      inputRef.current = description;
+    }
     setActiveField(null);
   };
 
   const selectedVehicleObj = vehicles.find(v => v.id === selectedVehicle);
   const canCalculate = origin.trim().length > 1 && destination.trim().length > 1;
+
+  // Memoized render function for FlatList
+  const renderSuggestion = useCallback(({ item }: { item: { description: string; placeId: string } }) => (
+    <SuggestionRow
+      description={item.description}
+      onPress={() => selectSuggestion(item.description)}
+    />
+  ), [activeField]);
+
+  const keyExtractor = useCallback((item: { placeId: string }) => item.placeId, []);
 
   const handleCalculate = async () => {
     if (!canCalculate) return;
@@ -130,6 +155,7 @@ export default function CalculateScreen() {
           routeCoordinates: result.route.routeCoordinates || '',
           stops: JSON.stringify(result.stops || []),
           nearbyRestAreas: JSON.stringify(result.nearbyRestAreas || []),
+          alternatives: JSON.stringify(result.alternatives || []),
         },
       });
     } catch (err: any) {
@@ -197,20 +223,17 @@ export default function CalculateScreen() {
 
         {/* Autocomplete suggestions */}
         {suggestions.length > 0 && activeField && (
-          <Card backgroundColor="white" borderRadius={16} marginHorizontal={16} marginTop={4} elevate style={styles.suggestionsCard}>
+          <View style={styles.suggestionsContainer}>
             <FlatList
               data={suggestions}
-              keyExtractor={(item) => item.placeId}
+              keyExtractor={keyExtractor}
               keyboardShouldPersistTaps="handled"
               style={{ maxHeight: 200 }}
-              renderItem={({ item }) => (
-                <TouchableOpacity style={styles.suggestionRow} onPress={() => selectSuggestion(item.description)} activeOpacity={0.7}>
-                  <View style={styles.suggestionDot} />
-                  <Text fontSize={14} color="#1C1C1E" flex={1} numberOfLines={2}>{item.description}</Text>
-                </TouchableOpacity>
-              )}
+              renderItem={renderSuggestion}
+              initialNumToRender={6}
+              windowSize={5}
             />
-          </Card>
+          </View>
         )}
       </KeyboardAvoidingView>
 
@@ -271,10 +294,10 @@ export default function CalculateScreen() {
           <Animated.Text style={[styles.loadingTitle, { transform: [{ scale: pulseAnim }] }]}>
             Hesaplanıyor...
           </Animated.Text>
-          <Text fontSize={15} color="rgba(255,255,255,0.65)" textAlign="center" marginTop={10}>
+          <Text fontSize={15} color="#3A3A3C" textAlign="center" marginTop={10}>
             {origin} → {destination}
           </Text>
-          <Text fontSize={12} color="rgba(255,255,255,0.4)" textAlign="center" marginTop={6}>
+          <Text fontSize={12} color="#8E8E93" textAlign="center" marginTop={6}>
             Gişe ve yakıt maliyetleri hesaplanıyor
           </Text>
         </View>
@@ -297,12 +320,10 @@ const styles = StyleSheet.create({
   carIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#EEF4FF', justifyContent: 'center', alignItems: 'center' },
   vehicleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   footer: { flexDirection: 'row', padding: 16, paddingBottom: 24, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E0E0E0', gap: 12 },
-  calcBtn: { backgroundColor: '#1C1C1E', borderRadius: 18, paddingVertical: 18, paddingHorizontal: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#1C1C1E', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8 },
-  calcBtnDisabled: { backgroundColor: '#9CA3AF', shadowOpacity: 0 },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,8,8,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
-  spinRing: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: 'rgba(255,255,255,0.12)', borderTopColor: 'white' },
-  loadingTitle: { fontSize: 24, fontWeight: '800', color: 'white', letterSpacing: -0.5, marginTop: 28 },
-  suggestionsCard: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12, elevation: 8, zIndex: 20 },
-  suggestionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', gap: 12 },
-  suggestionDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB' },
+  calcBtn: { backgroundColor: '#0A84FF', borderRadius: 18, paddingVertical: 18, paddingHorizontal: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#0A84FF', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8 },
+  calcBtnDisabled: { backgroundColor: '#C7C7CC', shadowOpacity: 0 },
+  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.92)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  spinRing: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: 'rgba(10,132,255,0.15)', borderTopColor: '#0A84FF' },
+  loadingTitle: { fontSize: 24, fontWeight: '800', color: '#1C1C1E', letterSpacing: -0.5, marginTop: 28 },
+  suggestionsContainer: { backgroundColor: 'white', borderRadius: 16, marginHorizontal: 16, marginTop: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12, elevation: 8, zIndex: 20 },
 });

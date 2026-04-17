@@ -26,6 +26,8 @@ interface Stats {
   totalCost: number;
   totalDistance: number;
   totalDuration: number;
+  weeklyCost: number;
+  monthlyCost: number;
 }
 
 export default function DashboardScreen() {
@@ -139,12 +141,26 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {/* ── Stats Cards ─────────────────────── */}
+        {/* ── Period Stats (Weekly/Monthly) ──────── */}
+        {hasData && (
+          <View style={styles.periodStatsSection}>
+            <View style={styles.periodCard}>
+              <Text style={styles.periodLabel}>Bu Hafta</Text>
+              <Text style={styles.periodAmount}>{formatCurrency(stats.weeklyCost)}</Text>
+            </View>
+            <View style={styles.periodCard}>
+              <Text style={styles.periodLabel}>Bu Ay</Text>
+              <Text style={styles.periodAmount}>{formatCurrency(stats.monthlyCost)}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── Total Stats Cards ─────────────────────── */}
         <View style={styles.statsSection}>
           {hasData ? (
             <View style={styles.statsRow}>
               {/* Toplam */}
-              <View style={[styles.statCard, { borderLeftColor: C.gold }]}>
+              <View style={[styles.statCard, { borderColor: C.gold }]}>
                 <View style={[styles.statIcon, { backgroundColor: C.goldSubtle }]}>
                   <Navigation size={16} color={C.gold} />
                 </View>
@@ -155,7 +171,7 @@ export default function DashboardScreen() {
               </View>
 
               {/* Yakıt */}
-              <View style={[styles.statCard, { borderLeftColor: C.fuel.PETROL }]}>
+              <View style={[styles.statCard, { borderColor: C.fuel.PETROL }]}>
                 <View style={[styles.statIcon, { backgroundColor: `${C.fuel.PETROL}18` }]}>
                   <Fuel size={16} color={C.fuel.PETROL} />
                 </View>
@@ -166,7 +182,7 @@ export default function DashboardScreen() {
               </View>
 
               {/* Gişe */}
-              <View style={[styles.statCard, { borderLeftColor: C.success }]}>
+              <View style={[styles.statCard, { borderColor: C.success }]}>
                 <View style={[styles.statIcon, { backgroundColor: `${C.success}18` }]}>
                   <MapPin size={16} color={C.success} />
                 </View>
@@ -270,7 +286,7 @@ const hero = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.25)',
+    backgroundColor: 'rgba(255,255,255,0.35)',
   },
   textOverlay: {
     position: 'absolute',
@@ -280,7 +296,7 @@ const hero = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 48,
     paddingTop: 80,
-    backgroundColor: 'rgba(9,9,9,0.55)',
+    backgroundColor: 'rgba(255,255,255,0.85)',
   },
   androidHero: {
     backgroundColor: C.surface,
@@ -321,8 +337,42 @@ const styles = StyleSheet.create({
   },
 
   // ── Stats
-  statsSection: {
+  periodStatsSection: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    gap: 12,
     marginTop: -28,
+    marginBottom: 16,
+    zIndex: 10,
+  },
+  periodCard: {
+    flex: 1,
+    backgroundColor: C.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  periodLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: C.textSoft,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  periodAmount: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: C.text,
+    letterSpacing: -0.5,
+  },
+  statsSection: {
     paddingHorizontal: 16,
     marginBottom: 8,
   },
@@ -335,9 +385,7 @@ const styles = StyleSheet.create({
     backgroundColor: C.card,
     borderRadius: 18,
     padding: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderLeftWidth: 3,
+    borderWidth: 1.5,
     gap: 8,
   },
   statIcon: {

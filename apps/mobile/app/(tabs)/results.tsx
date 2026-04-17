@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Dimensions, LayoutAnimation, Platform, UIManager, Modal } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { MapPin, Car, Clock, Fuel, ChevronLeft, Heart, Navigation, ChevronDown, ChevronUp, Coffee, X, Star } from 'lucide-react-native';
@@ -6,6 +6,7 @@ import MapView, { Marker, Polyline, Callout, PROVIDER_DEFAULT, PROVIDER_GOOGLE }
 import { routeService } from '@/services/routeService';
 import { historyService } from '@/services/historyService';
 import type { Route, NearbyRestArea } from '@/types/api';
+import { buildStrokeColors, decodePolyline, type RouteStep } from '@/utils/trafficColors';
 
 const { width } = Dimensions.get('window');
 
@@ -14,17 +15,6 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const MAP_PROVIDER = Platform.OS === 'ios' ? PROVIDER_DEFAULT : PROVIDER_GOOGLE;
-
-const getGradientColors = (count: number): string[] => {
-  if (count === 0) return [];
-  const toHex = (n: number) => Math.round(n).toString(16).padStart(2, '0');
-  const [sR, sG, sB] = [52, 199, 89];   // #34C759 yeşil (başlangıç)
-  const [eR, eG, eB] = [255, 45, 85];   // #FF2D55 kırmızı (bitiş)
-  return Array.from({ length: count }, (_, i) => {
-    const t = i / Math.max(count - 1, 1);
-    return `#${toHex(sR + (eR - sR) * t)}${toHex(sG + (eG - sG) * t)}${toHex(sB + (eB - sB) * t)}`;
-  });
-};
 
 export default function ResultsScreen() {
   const params = useLocalSearchParams();
@@ -38,6 +28,7 @@ export default function ResultsScreen() {
   const [animatedCoords, setAnimatedCoords] = useState<{ latitude: number, longitude: number }[]>([]);
   const [stopSuggestions, setStopSuggestions] = useState<any[]>([]);
   const [nearbyRestAreas, setNearbyRestAreas] = useState<NearbyRestArea[]>([]);
+  const [alternatives, setAlternatives] = useState<any[]>([]);
 
   useEffect(() => {
     loadResult();
@@ -114,6 +105,13 @@ export default function ResultsScreen() {
     if (params.nearbyRestAreas) {
       try {
         setNearbyRestAreas(JSON.parse(params.nearbyRestAreas as string));
+      } catch (e) { }
+    }
+
+    // Parse alternatives if passed via params
+    if (params.alternatives) {
+      try {
+        setAlternatives(JSON.parse(params.alternatives as string));
       } catch (e) { }
     }
 
@@ -200,6 +198,39 @@ export default function ResultsScreen() {
     return `${(meters / 1000).toFixed(1)} km`;
   };
 
+  // Parse routeSteps from backend (traffic-aware)
+  const routeSteps: RouteStep[] = useMemo(() => {
+    try {
+      const stepsJson = (route as any).routeStepsJson;
+      if (stepsJson && typeof stepsJson === 'string') {
+        return JSON.parse(stepsJson);
+      }
+      if (stepsJson && Array.isArray(stepsJson)) {
+        return stepsJson;
+      }
+    } catch {}
+    return [];
+  }, [route]);
+
+  // Build traffic-aware polyline coords and colors
+  const { coords: trafficCoords, colors: trafficColors } = useMemo(() => {
+    if (routeSteps.length > 0) {
+      return buildStrokeColors(routeSteps);
+    }
+    // Fallback: use decodedCoords with neutral blue
+    return { coords: decodedCoords, colors: undefined as undefined | string[] };
+  }, [routeSteps, decodedCoords]);
+
+  // Filter toll markers with bbox safety (Turkey bounds)
+  const validTolls = useMemo(
+    () => (route?.tollDetails ?? []).filter(t =>
+      typeof t.lat === 'number' && typeof t.lng === 'number' &&
+      t.lat > 35 && t.lat < 43 &&      // Türkiye kabaca
+      t.lng > 25 && t.lng < 45
+    ),
+    [route?.tollDetails],
+  );
+
   if (loading || !route) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -280,8 +311,9 @@ export default function ResultsScreen() {
             >
               {animatedCoords.length > 0 && (
                 <Polyline
-                  coordinates={animatedCoords}
-                  strokeColors={getGradientColors(animatedCoords.length)}
+                  coordinates={trafficColors ? trafficCoords : animatedCoords}
+                  strokeColors={trafficColors}
+                  strokeColor={!trafficColors ? '#4A90E2' : undefined}
                   strokeWidth={4}
                 />
               )}
@@ -298,8 +330,8 @@ export default function ResultsScreen() {
                 </Marker>
               )}
 
-              {/* Toll Gate Markers */}
-              {route.tollDetails?.filter(t => t.lat && t.lng).map((toll, idx) => (
+              {/* Toll Gate Markers (bbox-filtered) */}
+              {validTolls.map((toll, idx) => (
                 <Marker key={`toll-preview-${idx}`} coordinate={{ latitude: toll.lat, longitude: toll.lng }}>
                   <View style={styles.tollMarker}>
                     <Text style={styles.tollMarkerText}>₺</Text>
@@ -405,6 +437,50 @@ export default function ResultsScreen() {
           </View>
         </View>
 
+        {/* Alternatives Section */}
+        {alternatives.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Alternatif Rotalar</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.alternativesContainer}>
+              {alternatives.map((alt, idx) => {
+                // Calculate difference
+                const costDiff = alt.totalCost - route.totalCost;
+                const timeDiff = alt.duration - route.duration;
+                
+                return (
+                  <View key={`alt-${idx}`} style={styles.alternativeCard}>
+                    <Text style={styles.alternativeName} numberOfLines={1}>{alt.summary}</Text>
+                    
+                    <View style={styles.alternativeDetailRow}>
+                      <Clock size={14} color="#8E8E93" />
+                      <Text style={styles.alternativeDetailText}>{alt.durationText}</Text>
+                      {Math.abs(timeDiff) > 60 && (
+                        <Text style={[styles.diffBadge, { backgroundColor: timeDiff > 0 ? '#FFF0F0' : '#E8F8F5', color: timeDiff > 0 ? '#FF3B30' : '#34C759' }]}>
+                          {timeDiff > 0 ? '+' : ''}{Math.round(timeDiff / 60)} dk
+                        </Text>
+                      )}
+                    </View>
+                    
+                    <View style={styles.alternativeDetailRow}>
+                      <Navigation size={14} color="#8E8E93" />
+                      <Text style={styles.alternativeDetailText}>{alt.distanceText}</Text>
+                    </View>
+                    
+                    <View style={styles.alternativeCostBox}>
+                      <Text style={styles.alternativeCostValue}>{formatCurrency(alt.totalCost)}</Text>
+                      {Math.abs(costDiff) > 1 && (
+                        <Text style={[styles.diffBadge, { backgroundColor: costDiff > 0 ? '#FFF0F0' : '#E8F8F5', color: costDiff > 0 ? '#FF3B30' : '#34C759' }]}>
+                          {costDiff > 0 ? '+' : ''}{formatCurrency(costDiff)}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </>
+        )}
+
         {/* Bottom padding for scrolling */}
         <View style={{ height: 200 }} />
       </ScrollView>
@@ -440,7 +516,12 @@ export default function ResultsScreen() {
             }}
           >
             {animatedCoords.length > 0 && (
-              <Polyline coordinates={animatedCoords} strokeColors={getGradientColors(animatedCoords.length)} strokeWidth={5} />
+              <Polyline
+                coordinates={trafficColors ? trafficCoords : animatedCoords}
+                strokeColors={trafficColors}
+                strokeColor={!trafficColors ? '#4A90E2' : undefined}
+                strokeWidth={5}
+              />
             )}
             {route.originLat && route.originLng && (
               <Marker coordinate={{ latitude: route.originLat, longitude: route.originLng }}>
@@ -453,8 +534,8 @@ export default function ResultsScreen() {
               </Marker>
             )}
 
-            {/* Toll Gate Markers with Labels */}
-            {route.tollDetails?.filter(t => t.lat && t.lng).map((toll, idx) => (
+            {/* Toll Gate Markers with Labels (bbox-filtered) */}
+            {validTolls.map((toll, idx) => (
               <Marker key={`modal-toll-${idx}`} coordinate={{ latitude: toll.lat, longitude: toll.lng }}>
                 <View style={styles.tollMarkerLarge}>
                   <Text style={styles.tollMarkerTextLarge}>₺</Text>
@@ -932,11 +1013,16 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   primaryButton: {
-    backgroundColor: '#1C1C1E',
+    backgroundColor: '#0A84FF',
     borderRadius: 20,
     paddingVertical: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#0A84FF',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
   primaryButtonText: {
     color: '#FFFFFF',
@@ -1012,5 +1098,64 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#8E8E93',
     fontWeight: '400',
+  },
+  // Alternatives
+  alternativesContainer: {
+    paddingBottom: 24,
+    gap: 16,
+  },
+  alternativeCard: {
+    width: 260,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 16,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#F2F2F7',
+  },
+  alternativeName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1C1C1E',
+    marginBottom: 12,
+  },
+  alternativeDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  alternativeDetailText: {
+    fontSize: 14,
+    color: '#3A3A3C',
+    marginLeft: 8,
+    fontWeight: '500',
+    flex: 1,
+  },
+  diffBadge: {
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  alternativeCostBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F2F2F7',
+  },
+  alternativeCostValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1C1C1E',
+    letterSpacing: -0.5,
   },
 });

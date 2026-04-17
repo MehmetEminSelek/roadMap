@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -7,6 +7,7 @@ import { Vehicle } from '@prisma/client';
 import { RateLimiterService } from '../../common/rate-limiter/rate-limiter.service';
 import { RetryService } from '../../common/retry/retry.service';
 import { TollCalculationResult, TollDetail } from './dto/toll-calculation.dto';
+import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
 
 interface TollGuruResponse {
   status?: string;
@@ -57,26 +58,20 @@ type VehicleParams = {
   vehicle: Vehicle | null;
 };
 
-interface CacheEntry {
-  at: number;
-  data: TollCalculationResult;
-}
-
 @Injectable()
 export class TollGuruService {
   private readonly logger = new Logger(TollGuruService.name);
   private readonly apiUrl = 'https://apis.tollguru.com/toll/v2';
   private readonly apiKey: string;
   private readonly rateLimitKey = 'tollguru';
-  private readonly cache = new Map<string, CacheEntry>();
   private readonly TTL_MS = 24 * 60 * 60 * 1000; // 24 saat
-  private readonly CACHE_MAX = 500;
 
   constructor(
     private configService: ConfigService,
     private httpService: HttpService,
     private rateLimiter: RateLimiterService,
     private retryService: RetryService,
+    @Inject(CACHE_MANAGER) private cache: Cache,
   ) {
     this.apiKey = this.configService.get<string>('tollguru.apiKey') || '';
   }
@@ -91,10 +86,10 @@ export class TollGuruService {
   async computeTolls(params: VehicleParams): Promise<TollCalculationResult | null> {
     if (!this.isEnabled()) return null;
 
-    const key = this.cacheKey(params);
-    const cached = this.cache.get(key);
-    if (cached && Date.now() - cached.at < this.TTL_MS) {
-      return cached.data;
+    const key = `tollguru:v1:${this.cacheKey(params)}`;
+    const cached = await this.cache.get<TollCalculationResult>(key);
+    if (cached) {
+      return cached;
     }
 
     // 150 req/gun trial limit. Defansif: 100/gun.
@@ -137,7 +132,7 @@ export class TollGuruService {
         'TollGuru',
       );
 
-      if (result) this.setCache(key, result);
+      if (result) await this.cache.set(key, result, this.TTL_MS);
       return result;
     } catch (error: any) {
       const status = error?.response?.status;
@@ -163,19 +158,6 @@ export class TollGuruService {
     return `${r(params.origin.lat)},${r(params.origin.lng)}|${r(params.destination.lat)},${r(
       params.destination.lng,
     )}|${veh}`;
-  }
-
-  private setCache(key: string, data: TollCalculationResult) {
-    // LRU yerine sade eviction: dolunca ilk 50 entry'i sil (basit ve yeterli).
-    if (this.cache.size >= this.CACHE_MAX) {
-      const toDrop = Math.floor(this.CACHE_MAX / 10);
-      const iter = this.cache.keys();
-      for (let i = 0; i < toDrop; i++) {
-        const k = iter.next().value;
-        if (k) this.cache.delete(k);
-      }
-    }
-    this.cache.set(key, { at: Date.now(), data });
   }
 
   private mapResponseToResult(data: TollGuruResponse): TollCalculationResult | null {

@@ -54,6 +54,7 @@ export interface Route {
   vehicle?: Vehicle;
   createdAt: string;
   routeCoordinates?: string;
+  routeStepsJson?: any; // Per-step traffic data (Phase 2)
 }
 
 export interface FavoriteRoute {
@@ -138,6 +139,7 @@ export interface RouteCalculationResult {
   };
   stops?: StopSuggestion[];
   nearbyRestAreas?: NearbyRestArea[];
+  alternatives?: any[];
 }
 
 export interface StopSuggestion {

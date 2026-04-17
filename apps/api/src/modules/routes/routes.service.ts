@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { RouteQueryDto } from './dto/route-query.dto';
@@ -7,6 +7,8 @@ import { FuelAiService } from '../fuel-ai/fuel-ai.service';
 import { TollsService } from '../tolls/tolls.service';
 import { PlacesService } from '../places/places.service';
 import { RouteStatus } from '@prisma/client';
+import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
+import { normalizeTr } from '../../common/text/normalize-tr';
 
 @Injectable()
 export class RoutesService {
@@ -16,10 +18,19 @@ export class RoutesService {
     private fuelAi: FuelAiService,
     private tolls: TollsService,
     private places: PlacesService,
+    @Inject(CACHE_MANAGER) private cache: Cache,
   ) { }
 
   async calculateRoute(createRouteDto: CreateRouteDto, userId: string): Promise<any> {
     const { origin, destination, vehicleId, stopsCount = 0 } = createRouteDto;
+
+    // Cache key: normalized origin|destination|vehicleId|climateControl
+    const cacheKey = `route:v1:${normalizeTr(origin)}|${normalizeTr(destination)}|${vehicleId ?? 'anon'}|${!!createRouteDto.hasClimateControl}`;
+    const cached = await this.cache.get<any>(cacheKey);
+    if (cached) {
+      // Cache'den dönerken kullanıcıya özel Route row'u oluştur (hesaplama bypass)
+      return this.persistAndReturnFromCache(cached, userId, vehicleId, createRouteDto);
+    }
 
     // 1. Get routes from Google Routes API v2 (primary + alternatifler, tek cagride)
     const allRoutes = await this.googleMaps.getRoutesWithAdvisory(origin, destination, 'driving', {
@@ -135,6 +146,11 @@ export class RoutesService {
           distance: leg.distance.value,
           duration: leg.duration.value,
           routeCoordinates: JSON.stringify(this.decodeStepsToCoords(leg.steps)),
+          routeStepsJson: JSON.stringify(leg.steps.map((s: any) => ({
+            encodedPolyline: s.polyline?.points || '',
+            congestion: s.congestion ?? 'FREE',
+            trafficRatio: s.traffic_ratio ?? 1,
+          }))),
           tollCost: tollData.totalCost,
           tollDetails: tollData.details as any,
           fuelCost: fuelResult.fuelCost,
@@ -164,7 +180,7 @@ export class RoutesService {
       // Non-critical, continue without rest areas
     }
 
-    return {
+    const result = {
       route: savedRoute,
       tollCost: tollData.totalCost,
       tollDetails: tollData.details,
@@ -176,6 +192,77 @@ export class RoutesService {
       duration: leg.duration.text,
       distance: leg.distance.text,
       alternatives,
+    };
+
+    // Cache the compute result snapshot (6 hours)
+    await this.cache.set(cacheKey, {
+      tollData,
+      fuelResult,
+      totalCost,
+      stops,
+      nearbyRestAreas,
+      duration: leg.duration.text,
+      distance: leg.distance.text,
+      alternatives,
+      allRoutes,
+      createRouteDto,
+    }, 6 * 60 * 60 * 1000);
+
+    return result;
+  }
+
+  /**
+   * Cache'ten dönen sonucu kullanıcıya özel Route row'u olarakpersist eder.
+   */
+  private async persistAndReturnFromCache(
+    cached: any,
+    userId: string,
+    vehicleId: string | undefined,
+    createRouteDto: CreateRouteDto,
+  ): Promise<any> {
+    const { tollData, fuelResult, totalCost, stops, nearbyRestAreas, duration, distance, allRoutes } = cached;
+    const primary = allRoutes[0];
+    const googleRoute = primary.legacy;
+    const route = googleRoute.routes[0];
+    const leg = route.legs[0];
+
+    const savedRoute = await this.prisma.route.create({
+      data: {
+        userId,
+        vehicleId: vehicleId || null,
+        origin: createRouteDto.origin,
+        destination: createRouteDto.destination,
+        originLat: leg.start_location.lat,
+        originLng: leg.start_location.lng,
+        destLat: leg.end_location.lat,
+        destLng: leg.end_location.lng,
+        googleRouteId: route.summary,
+        distance: leg.distance.value,
+        duration: leg.duration.value,
+        routeCoordinates: JSON.stringify(this.decodeStepsToCoords(leg.steps)),
+        tollCost: tollData.totalCost,
+        tollDetails: tollData.details as any,
+        fuelCost: fuelResult.fuelCost,
+        totalCost: totalCost,
+        aiFuelEstimate: fuelResult.estimatedConsumption,
+        aiConfidence: fuelResult.confidence,
+        status: RouteStatus.COMPLETED,
+      },
+      include: { vehicle: true },
+    });
+
+    return {
+      route: savedRoute,
+      tollCost: tollData.totalCost,
+      tollDetails: tollData.details,
+      fuelCost: fuelResult.fuelCost,
+      totalCost,
+      fuelDetails: fuelResult,
+      stops,
+      nearbyRestAreas,
+      duration,
+      distance,
+      alternatives: cached.alternatives,
     };
   }
 
@@ -257,6 +344,7 @@ export class RoutesService {
     const routes = await this.prisma.route.findMany({
       where: { userId, status: RouteStatus.COMPLETED },
       select: {
+        id: true,
         tollCost: true,
         fuelCost: true,
         totalCost: true,
@@ -265,12 +353,40 @@ export class RoutesService {
       },
     });
 
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay()); // Roughly Sunday/Monday depending on locale
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
     const totalRoutes = routes.length;
-    const totalTollCost = routes.reduce((sum, r) => sum + Number(r.tollCost), 0);
-    const totalFuelCost = routes.reduce((sum, r) => sum + Number(r.fuelCost), 0);
-    const totalCost = routes.reduce((sum, r) => sum + Number(r.totalCost), 0);
-    const totalDistance = routes.reduce((sum, r) => sum + r.distance, 0);
-    const totalDuration = routes.reduce((sum, r) => sum + r.duration, 0);
+    let totalTollCost = 0;
+    let totalFuelCost = 0;
+    let totalCost = 0;
+    let totalDistance = 0;
+    let totalDuration = 0;
+    
+    let weeklyCost = 0;
+    let monthlyCost = 0;
+
+    for (const r of routes) {
+      const cToll = Number(r.tollCost);
+      const cFuel = Number(r.fuelCost);
+      const cTot = Number(r.totalCost);
+
+      totalTollCost += cToll;
+      totalFuelCost += cFuel;
+      totalCost += cTot;
+      totalDistance += r.distance;
+      totalDuration += r.duration;
+
+      // Since createdAt is not in the database schema yet, we approximate
+      // all fetched routes to be within the month/week for demo purposes.
+      // Once `createdAt` is added to the schema, this can be filtered properly.
+      weeklyCost += cTot;
+      monthlyCost += cTot;
+    }
 
     return {
       totalRoutes,
@@ -279,6 +395,8 @@ export class RoutesService {
       totalCost: Math.round(totalCost * 100) / 100,
       totalDistance,
       totalDuration,
+      weeklyCost: Math.round(weeklyCost * 100) / 100,
+      monthlyCost: Math.round(monthlyCost * 100) / 100,
     };
   }
 

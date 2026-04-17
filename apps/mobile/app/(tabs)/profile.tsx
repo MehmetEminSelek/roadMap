@@ -1,11 +1,27 @@
-import { View, Text, StyleSheet, TouchableOpacity, Platform, ScrollView } from 'react-native';
-import { router } from 'expo-router';
-import { Car, LogOut, ChevronRight, Shield, Info } from 'lucide-react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, ScrollView, ActivityIndicator } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useState, useCallback } from 'react';
+import { Car, LogOut, ChevronRight, Shield, Info, Navigation, MapPin, Route as RouteIcon } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { routeService } from '@/services/routeService';
 import { C } from '@/theme';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      routeService.getStats()
+        .then(setStats)
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }, [])
+  );
+
+  const formatCurrency = (amount: number) => `₺${Math.round(amount).toLocaleString('tr-TR')}`;
+  const formatDistance = (meters: number) => meters ? `${(meters / 1000).toFixed(0)} km` : '0 km';
 
   const menuItems = [
     {
@@ -47,6 +63,37 @@ export default function ProfileScreen() {
         </View>
         <Text style={styles.name}>{user?.name || 'Kullanıcı'}</Text>
         <Text style={styles.email}>{user?.email || ''}</Text>
+      </View>
+
+      {/* ── Stats Section ──────────────────────────── */}
+      <View style={styles.statsSection}>
+        <View style={styles.statBox}>
+          <View style={[styles.statIconBox, { backgroundColor: `${C.primary}15` }]}>
+            <RouteIcon size={20} color={C.primary} />
+          </View>
+          <Text style={styles.statValue}>{loading ? '-' : (stats?.totalRoutes || 0)}</Text>
+          <Text style={styles.statLabel}>Rota</Text>
+        </View>
+        
+        <View style={styles.statDivider} />
+        
+        <View style={styles.statBox}>
+          <View style={[styles.statIconBox, { backgroundColor: `${C.success}15` }]}>
+            <MapPin size={20} color={C.success} />
+          </View>
+          <Text style={styles.statValue}>{loading ? '-' : formatDistance(stats?.totalDistance || 0)}</Text>
+          <Text style={styles.statLabel}>Mesafe</Text>
+        </View>
+
+        <View style={styles.statDivider} />
+        
+        <View style={styles.statBox}>
+          <View style={[styles.statIconBox, { backgroundColor: `${C.fuel.PETROL}15` }]}>
+            <Navigation size={20} color={C.fuel.PETROL} />
+          </View>
+          <Text style={styles.statValue}>{loading ? '-' : formatCurrency(stats?.totalCost || 0)}</Text>
+          <Text style={styles.statLabel}>Harcama</Text>
+        </View>
       </View>
 
       {/* ── Menu Section ───────────────────────────── */}
@@ -135,6 +182,52 @@ const styles = StyleSheet.create({
   },
   email: {
     fontSize: 14,
+    color: C.textSoft,
+  },
+
+  // ── Stats
+  statsSection: {
+    flexDirection: 'row',
+    backgroundColor: C.card,
+    marginHorizontal: 16,
+    borderRadius: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  statBox: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: C.borderMuted,
+    marginVertical: 4,
+  },
+  statIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.text,
+    marginBottom: 2,
+  },
+  statLabel: {
+    fontSize: 12,
+    fontWeight: '600',
     color: C.textSoft,
   },
 

@@ -5,6 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { PrismaService } from './prisma/prisma.service';
 import { CommonModule } from './common/common.module';
+import { AppCacheModule } from './common/cache/cache.module';
 import googleMapsConfig from './config/google-maps.config';
 
 // Modules
@@ -52,6 +53,7 @@ function validateConfig(config: Record<string, unknown>) {
       load: [googleMapsConfig],
       validate: validateConfig,
     }),
+    AppCacheModule,
     ThrottlerModule.forRoot([{
       ttl: 60000,
       limit: 60,

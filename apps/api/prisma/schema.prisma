@@ -134,14 +134,14 @@ model Route {
   distance            Int           // Metre
   duration            Int           // Saniye
   routeCoordinates    String?       // GeoJSON
+  routeStepsJson      Json?         // Per-step traffic data (Phase 2)
 
   // Hesaplanan maliyetler
   tollCost            Decimal       @db.Decimal(10, 2)
-  tollDetails         Json?         
+  tollDetails         Json?
   fuelCost            Decimal       @db.Decimal(10, 2)
   totalCost           Decimal       @db.Decimal(10, 2)
 
-  // AI faktörleri
   aiFuelEstimate      Decimal?      @db.Decimal(5, 2)
   aiConfidence        Float?
 

@@ -90,6 +90,10 @@ export interface DirectionsStep {
     lng: number;
   };
   travel_mode: string;
+  // Traffic-aware fields (Phase 2)
+  static_duration_seconds?: number;
+  traffic_ratio?: number;
+  congestion?: 'FREE' | 'LIGHT' | 'MEDIUM' | 'HEAVY';
 }
 
 export interface PlacesResponse {
@@ -140,6 +144,7 @@ export interface RoutesV2TollInfo {
 
 export interface RoutesV2Step {
   distanceMeters?: number;
+  duration?: string; // traffic-aware duration
   staticDuration?: string;
   polyline?: RoutesV2Polyline;
   startLocation?: RoutesV2Location;

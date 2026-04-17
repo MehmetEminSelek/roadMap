@@ -35,6 +35,8 @@ export const routeService = {
     totalCost: number;
     totalDistance: number;
     totalDuration: number;
+    weeklyCost: number;
+    monthlyCost: number;
   }> {
     const response = await apiClient.get('/routes/stats');
     return response.data;

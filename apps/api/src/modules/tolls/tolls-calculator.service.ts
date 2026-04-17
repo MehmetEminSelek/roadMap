@@ -28,6 +28,9 @@ export class TollsCalculatorService {
   // Eski 2 km cok genisti (paralel yolda yanlis eslesme). Polyline'a dikey mesafe ile 500 m.
   private readonly MATCH_RADIUS_KM = 0.5;
 
+  // Gosterim icin snap-to-polyline ile marker'lari yol uzerine oturtuyoruz.
+  private readonly DISPLAY_MATCH_RADIUS_KM = 1;
+
   constructor(private prisma: PrismaService) {}
 
   /**
@@ -132,11 +135,8 @@ export class TollsCalculatorService {
    * Rota polyline'i boyunca tum KGM istasyonlarini dikey mesafe ile eslestirir,
    * polyline sirasina gore siralanmis liste doner. Amac: TollGuru'nun isimsiz
    * donen HGS toll'larina gercek gise ismi/koordinati eslemek.
+   * Marker'lari yol uzerine oturtmak icin snap-to-polyline uygulanir.
    */
-  // Seed koordinatlari bazen gise plazasindan birkac km uzakta sehir merkezinde; gosterim
-  // icin 3 km radyus kullan (hesaplama icin 500m hala kullanilir).
-  private readonly DISPLAY_MATCH_RADIUS_KM = 3;
-
   async matchedStationsAlongRoute(
     route: DirectionsRoute,
   ): Promise<Array<{ name: string; highway: string; lat: number; lng: number; polylineIndex: number }>> {
@@ -152,11 +152,13 @@ export class TollsCalculatorService {
       if (s.lat == null || s.lng == null) continue;
       const nearest = this.nearestSegmentToPoint(polyline, { lat: s.lat, lng: s.lng });
       if (nearest.distanceKm < this.DISPLAY_MATCH_RADIUS_KM) {
+        // Snap-to-polyline: marker'i yol uzerine oturt
+        const snapped = polyline[nearest.segmentIndex] || polyline[nearest.segmentIndex + 1] || polyline[0];
         matches.push({
           name: s.name,
           highway: (s as any).highway || 'Otoyol',
-          lat: s.lat,
-          lng: s.lng,
+          lat: snapped.lat,
+          lng: snapped.lng,
           polylineIndex: nearest.segmentIndex,
         });
       }

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { FuelCalculateDto } from './dto/fuel-calculate.dto';
+import { FuelPriceService } from './fuel-price.service';
 import { Vehicle } from '@prisma/client';
 import { AxiosResponse } from 'axios';
 
@@ -38,15 +39,14 @@ interface GeminiResponse {
 export class FuelAiService {
   private readonly apiKey: string;
   private readonly apiUrl: string;
-  private readonly fuelPrice: number;
 
   constructor(
     private configService: ConfigService,
     private httpService: HttpService,
+    private fuelPriceService: FuelPriceService,
   ) {
     this.apiKey = this.configService.get<string>('googleGemini.apiKey') || '';
     this.apiUrl = this.configService.get<string>('googleGemini.apiUrl', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
-    this.fuelPrice = this.configService.get<number>('fuel.price', this.configService.get<number>('FUEL_PRICE_TL', 32.45)); // TL/L (env'den okur, yoksa 32.45 default)
   }
 
   async calculateFuelCost(dto: FuelCalculateDto): Promise<FuelCalculationResult> {
@@ -90,12 +90,13 @@ export class FuelAiService {
       }
     }
 
-    const totalFuelCost = finalConsumption * this.fuelPrice;
+    const currentFuelPrice = this.fuelPriceService.getPriceForType(dto.vehicleType || 'petrol');
+    const totalFuelCost = finalConsumption * currentFuelPrice;
 
     return {
       fuelCost: totalFuelCost,
       estimatedConsumption: finalConsumption,
-      fuelPrice: this.fuelPrice,
+      fuelPrice: currentFuelPrice,
       confidence,
       breakdown: {
         baseConsumption,

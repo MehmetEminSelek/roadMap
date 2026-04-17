@@ -7,7 +7,7 @@ function CenterTabButton({ onPress }: { onPress?: (...args: any[]) => void }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.centerWrap}>
       <View style={styles.centerBtn}>
-        <Navigation size={26} color="#090909" />
+        <Navigation size={26} color="#FFFFFF" />
       </View>
     </TouchableOpacity>
   );
@@ -33,7 +33,7 @@ export default function TabsLayout() {
           borderTopColor: C.border,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: 0.5,
+          shadowOpacity: 0.1,
           shadowRadius: 16,
           elevation: 12,
         },

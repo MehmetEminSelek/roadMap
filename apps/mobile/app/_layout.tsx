@@ -4,7 +4,15 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { TamaguiProvider } from 'tamagui';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import tamaguiConfig from '../tamagui.config';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { staleTime: 60_000, gcTime: 24 * 60 * 60 * 1000, retry: 1 },
+    mutations: { retry: 0 },
+  },
+});
 
 function RootNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -45,13 +53,15 @@ function RootNavigator() {
 
 export default function RootLayout() {
   return (
-    <TamaguiProvider config={tamaguiConfig} defaultTheme="light">
-      <SafeAreaProvider>
-        <AuthProvider>
-          <RootNavigator />
-        </AuthProvider>
-      </SafeAreaProvider>
-    </TamaguiProvider>
+    <QueryClientProvider client={queryClient}>
+      <TamaguiProvider config={tamaguiConfig} defaultTheme="light">
+        <SafeAreaProvider>
+          <AuthProvider>
+            <RootNavigator />
+          </AuthProvider>
+        </SafeAreaProvider>
+      </TamaguiProvider>
+    </QueryClientProvider>
   );
 }
 

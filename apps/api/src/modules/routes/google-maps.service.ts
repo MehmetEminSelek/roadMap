@@ -147,6 +147,9 @@ export class GoogleMapsService {
         async () => {
           const travelMode = this.mapTravelMode(mode);
 
+          // NOT: Routes v2 Step message'da `duration` alani YOK, yalnizca `staticDuration` var.
+          // Trafik-farkindalikli sure sadece leg/route seviyesinde doner. Segment-bazli trafik
+          // icin `routes.legs.travelAdvisory.speedReadingIntervals` kullaniyoruz (NORMAL/SLOW/TRAFFIC_JAM).
           const fieldMask = [
             'routes.description',
             'routes.distanceMeters',
@@ -163,6 +166,7 @@ export class GoogleMapsService {
             'routes.legs.steps.polyline.encodedPolyline',
             'routes.legs.steps.startLocation',
             'routes.legs.steps.endLocation',
+            'routes.legs.travelAdvisory.speedReadingIntervals',
             'routes.travelAdvisory.tollInfo',
             'routes.travelAdvisory.fuelConsumptionMicroliters',
           ].join(',');
@@ -298,19 +302,29 @@ export class GoogleMapsService {
 
   private adaptV2Step(step: RoutesV2Step): DirectionsStep {
     const distanceMeters = step.distanceMeters ?? 0;
-    const durationSec = this.parseDurationSeconds(step.staticDuration);
+    const staticSec = this.parseDurationSeconds(step.staticDuration);
+    const trafficSec = this.parseDurationSeconds(step.duration);
+    const ratio = staticSec > 0 ? trafficSec / staticSec : 1;
+    const congestion =
+      ratio < 1.1 ? 'FREE' :
+      ratio < 1.3 ? 'LIGHT' :
+      ratio < 1.6 ? 'MEDIUM' : 'HEAVY';
+
     const start = step.startLocation?.latLng ?? { latitude: 0, longitude: 0 };
     const end = step.endLocation?.latLng ?? { latitude: 0, longitude: 0 };
 
     return {
       distance: { text: this.formatDistanceText(distanceMeters), value: distanceMeters },
-      duration: { text: this.formatDurationText(durationSec), value: durationSec },
+      duration: { text: this.formatDurationText(trafficSec), value: trafficSec },
       start_location: { lat: start.latitude, lng: start.longitude },
       end_location: { lat: end.latitude, lng: end.longitude },
       html_instructions: '',
       maneuver: '',
       polyline: { points: step.polyline?.encodedPolyline || '' },
       travel_mode: 'DRIVING',
+      static_duration_seconds: staticSec,
+      traffic_ratio: ratio,
+      congestion,
     };
   }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ScrollView,
   TouchableOpacity,
@@ -17,6 +17,7 @@ import { routeService } from '@/services/routeService';
 import { historyService } from '@/services/historyService';
 import type { Route } from '@/types/api';
 import { C } from '@/theme';
+import { buildStrokeColors, type RouteStep } from '@/utils/trafficColors';
 
 const MAP_PROVIDER = Platform.OS === 'ios' ? PROVIDER_DEFAULT : PROVIDER_GOOGLE;
 
@@ -35,17 +36,6 @@ function decodePath(encoded: string): { latitude: number; longitude: number }[] 
   }
 }
 
-function getGradientColors(count: number): string[] {
-  if (count === 0) return [];
-  const toHex = (n: number) => Math.round(n).toString(16).padStart(2, '0');
-  const [sR, sG, sB] = [52, 199, 89];
-  const [eR, eG, eB] = [255, 45, 85];
-  return Array.from({ length: count }, (_, i) => {
-    const t = i / Math.max(count - 1, 1);
-    return `#${toHex(sR + (eR - sR) * t)}${toHex(sG + (eG - sG) * t)}${toHex(sB + (eB - sB) * t)}`;
-  });
-}
-
 export default function RouteDetailScreen() {
   const { id } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
@@ -56,6 +46,28 @@ export default function RouteDetailScreen() {
   const [coords, setCoords] = useState<{ latitude: number; longitude: number }[]>([]);
 
   useEffect(() => { loadRoute(); }, [id]);
+
+  // Parse routeSteps from backend (traffic-aware)
+  const routeSteps: RouteStep[] = useMemo(() => {
+    try {
+      const stepsJson = (route as any)?.routeStepsJson;
+      if (stepsJson && typeof stepsJson === 'string') {
+        return JSON.parse(stepsJson);
+      }
+      if (stepsJson && Array.isArray(stepsJson)) {
+        return stepsJson;
+      }
+    } catch {}
+    return [];
+  }, [route]);
+
+  // Build traffic-aware polyline coords and colors
+  const { coords: trafficCoords, colors: trafficColors } = useMemo(() => {
+    if (routeSteps.length > 0) {
+      return buildStrokeColors(routeSteps);
+    }
+    return { coords, colors: undefined as undefined | string[] };
+  }, [routeSteps, coords]);
 
   const loadRoute = async () => {
     try {
@@ -174,8 +186,9 @@ export default function RouteDetailScreen() {
             }}
           >
             <Polyline
-              coordinates={coords}
-              strokeColors={getGradientColors(coords.length)}
+              coordinates={trafficColors ? trafficCoords : coords}
+              strokeColors={trafficColors}
+              strokeColor={!trafficColors ? '#4A90E2' : undefined}
               strokeWidth={4}
             />
             <Marker coordinate={coords[0]}>
