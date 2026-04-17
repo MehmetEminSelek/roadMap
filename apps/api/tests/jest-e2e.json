@@ -1,0 +1,18 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "../",
+  "testMatch": ["<rootDir>/tests/**/*.e2e-spec.ts"],
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "coverageDirectory": "./tests/coverage",
+  "testEnvironment": "node",
+  "moduleNameMapper": {
+    "^@src/(.*)$": "<rootDir>/src/$1",
+    "^@modules/(.*)$": "<rootDir>/src/modules/$1",
+    "^@common/(.*)$": "<rootDir>/src/common/$1"
+  },
+  "setupFilesAfterEnv": ["<rootDir>/tests/setup.ts"],
+  "testTimeout": 30000,
+  "maxWorkers": 1
+}

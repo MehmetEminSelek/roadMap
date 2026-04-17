@@ -148,7 +148,7 @@ export class PlacesService {
           });
         }
       } catch (e) {
-        // Silently skip failed searches
+        console.error(`[PlacesService] Rest area search failed at (${point.lat}, ${point.lng}):`, e);
       }
     }
 

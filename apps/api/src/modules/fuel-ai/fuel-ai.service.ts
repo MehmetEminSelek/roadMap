@@ -45,8 +45,8 @@ export class FuelAiService {
     private httpService: HttpService,
   ) {
     this.apiKey = this.configService.get<string>('googleGemini.apiKey') || '';
-    this.apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
-    this.fuelPrice = this.configService.get<number>('fuel.price', 28.5); // TL/L (varsayılan)
+    this.apiUrl = this.configService.get<string>('googleGemini.apiUrl', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
+    this.fuelPrice = this.configService.get<number>('fuel.price', this.configService.get<number>('FUEL_PRICE_TL', 32.45)); // TL/L (env'den okur, yoksa 32.45 default)
   }
 
   async calculateFuelCost(dto: FuelCalculateDto): Promise<FuelCalculationResult> {
@@ -180,7 +180,7 @@ export class FuelAiService {
 
       const response: AxiosResponse<GeminiResponse> = await firstValueFrom(
         this.httpService.post<GeminiResponse>(`${this.apiUrl}?key=${this.apiKey}`, payload, {
-          timeout: 10000,
+          timeout: 25000,
         }),
       );
 

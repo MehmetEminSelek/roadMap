@@ -154,50 +154,20 @@ export default function ResultsScreen() {
   const decodePath = (encoded: string) => {
     if (!encoded) return;
     try {
-      // Remove surrounding quotes if present
       let str = encoded;
+      // Remove surrounding quotes if present (JSON string format)
       if (str.startsWith('"') && str.endsWith('"')) {
         str = str.substring(1, str.length - 1);
       }
 
-      // Try parsing as JSON array first (new format: [{lat, lng}, ...])
-      if (str.startsWith('[')) {
-        const parsed = JSON.parse(str);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Check if it's array of {lat, lng} objects
-          if (typeof parsed[0] === 'object' && 'lat' in parsed[0]) {
-            setDecodedCoords(parsed.map((p: any) => ({
-              latitude: p.lat,
-              longitude: p.lng,
-            })));
-            return;
-          }
-        }
+      // Parse as JSON array: [{lat, lng}, ...]
+      const parsed = JSON.parse(str);
+      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'object' && 'lat' in parsed[0]) {
+        setDecodedCoords(parsed.map((p: any) => ({
+          latitude: p.lat,
+          longitude: p.lng,
+        })));
       }
-
-      // Fallback: decode as encoded polyline string (old format)
-      let index = 0, lat = 0, lng = 0, coordinates = [];
-      while (index < str.length) {
-        let b, shift = 0, result = 0;
-        do {
-          b = str.charCodeAt(index++) - 63;
-          result |= (b & 0x1f) << shift;
-          shift += 5;
-        } while (b >= 0x20);
-        let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lat += dlat;
-        shift = 0;
-        result = 0;
-        do {
-          b = str.charCodeAt(index++) - 63;
-          result |= (b & 0x1f) << shift;
-          shift += 5;
-        } while (b >= 0x20);
-        let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lng += dlng;
-        coordinates.push({ latitude: (lat / 1e5), longitude: (lng / 1e5) });
-      }
-      setDecodedCoords(coordinates);
     } catch (e) {
       console.error("Polyline decoding failed", e);
     }

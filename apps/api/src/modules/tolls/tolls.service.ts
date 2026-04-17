@@ -1,11 +1,38 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DirectionsRoute } from '../routes/dto/google-maps.dto';
+import { DirectionsRoute, RoutesV2TollInfo } from '../routes/dto/google-maps.dto';
 import { Vehicle } from '@prisma/client';
+import { TollsCalculatorService } from './tolls-calculator.service';
+import { TollGuruService } from './tollguru.service';
+import { TollCalculationResult } from './dto/toll-calculation.dto';
 
+/**
+ * Toll orchestrator.
+ *
+ * Provider stratejisi (ENV `TOLL_PROVIDER`):
+ *  - `tollguru` : sadece TollGuru; basarisizsa bos sonuc.
+ *  - `local`    : sadece KGM seed + km tahmini fallback.
+ *  - `auto` (default): TollGuru -> KGM local -> estimate zinciri.
+ */
 @Injectable()
 export class TollsService {
-  constructor(private prisma: PrismaService) { }
+  private readonly logger = new Logger(TollsService.name);
+  private readonly provider: 'tollguru' | 'local' | 'auto';
+
+  constructor(
+    private prisma: PrismaService,
+    private configService: ConfigService,
+    private calculator: TollsCalculatorService,
+    private tollGuru: TollGuruService,
+  ) {
+    const configured = (
+      this.configService.get<string>('tollguru.provider') || 'auto'
+    ).toLowerCase();
+    this.provider = (['tollguru', 'local', 'auto'].includes(configured)
+      ? configured
+      : 'auto') as 'tollguru' | 'local' | 'auto';
+  }
 
   async getAllStations() {
     return this.prisma.tollStation.findMany({
@@ -24,218 +51,75 @@ export class TollsService {
     const grouped: Record<string, any> = {};
     for (const rate of rates) {
       if (!grouped[rate.tollStationId]) {
-        grouped[rate.tollStationId] = {
-          station: rate.tollStation,
-          rates: [],
-        };
+        grouped[rate.tollStationId] = { station: rate.tollStation, rates: [] };
       }
       grouped[rate.tollStationId].rates.push(rate);
     }
-
     return Object.values(grouped);
   }
 
   async getRatesForStation(stationId: string) {
-    const station = await this.prisma.tollStation.findUnique({
-      where: { id: stationId },
-    });
-
-    if (!station) {
-      throw new BadRequestException('Toll station not found');
-    }
-
+    const station = await this.prisma.tollStation.findUnique({ where: { id: stationId } });
+    if (!station) throw new BadRequestException('Toll station not found');
     const rates = await this.prisma.tollRate.findMany({
       where: { tollStationId: stationId, isActive: true },
     });
-
     return { station, rates };
   }
 
+  /**
+   * Rota icin toll hesabi. `googleTollHint` Routes API v2'den gelen ham tahmin;
+   * su an bilgilendirme amacli logla tutuluyor — gelecekte TollGuru/KGM sonucuyla
+   * carsi yapmak icin kullanilabilir.
+   */
   async calculateTollCost(
     route: DirectionsRoute,
     vehicle: Vehicle | null,
-  ): Promise<{
-    totalCost: number;
-    details: { name: string; highway: string; amount: number; lat: number; lng: number }[];
-  }> {
-    // Get stations with coordinates and their rates
-    const stations = await this.prisma.tollStation.findMany({
-      where: {
-        isActive: true,
-        lat: { not: null },
-        lng: { not: null },
-      },
-      include: {
-        tolls: { where: { isActive: true } },
-      },
-    });
-
-    if (stations.length === 0 || !route.legs?.[0]?.steps) {
-      return { totalCost: this.estimateTollCost(route, vehicle), details: [] };
-    }
-
-    // Decode ALL step-level polylines for accurate matching
-    const polylinePoints: { lat: number; lng: number }[] = [];
-    for (const step of route.legs[0].steps) {
-      if (step.polyline?.points) {
-        polylinePoints.push(...decodePolyline(step.polyline.points));
-      }
-    }
-    if (polylinePoints.length === 0 && route.overview_polyline?.points) {
-      polylinePoints.push(...decodePolyline(route.overview_polyline.points));
-    }
-
-    const vehicleType = this.getVehicleType(vehicle);
-    let totalCost = 0;
-    const details: { name: string; highway: string; amount: number; lat: number; lng: number }[] = [];
-    const highwayMatches: Record<string, { name: string; amount: number; lat: number; lng: number }[]> = {};
-
-    for (const station of stations) {
-      if (station.lat === null || station.lng === null) continue;
-
-      // Check if any polyline point is within 2km of the station
-      // Using step-level polylines allows tighter radius
-      const isOnRoute = polylinePoints.some(
-        (point) => haversineDistance(point, { lat: station.lat!, lng: station.lng! }) < 2.0,
+    googleTollHint?: RoutesV2TollInfo,
+  ): Promise<{ totalCost: number; details: TollCalculationResult['details']; source?: string }> {
+    if (googleTollHint?.estimatedPrice?.length) {
+      const p = googleTollHint.estimatedPrice[0];
+      this.logger.debug(
+        `Google v2 toll hint: ${p.units ?? '?'} ${p.currencyCode ?? ''} (nanos=${p.nanos ?? 0})`,
       );
-
-      if (isOnRoute) {
-        const rate = station.tolls.find((r) => r.vehicleType === vehicleType);
-        if (rate && Number(rate.amount) > 0) {
-          const highway = (station as any).highway || 'Diğer';
-          if (!highwayMatches[highway]) {
-            highwayMatches[highway] = [];
-          }
-
-          highwayMatches[highway].push({ name: station.name, amount: Number(rate.amount), lat: station.lat!, lng: station.lng! });
-        }
-      }
     }
 
-    // KGM Pricing Logic:
-    // - Bridges/Tunnels (Köprü, Tünel): Point-based, sum them up
-    // - Highways (Otoyol): Cumulative/distance-based from main entry, take the MAX matched exit fee
-    for (const [highway, matches] of Object.entries(highwayMatches)) {
-      if (highway.includes('Köprü') || highway.includes('Tünel') || highway === 'Diğer') {
-        matches.forEach((m) => {
-          totalCost += m.amount;
-          details.push({ name: m.name, highway, amount: m.amount, lat: m.lat, lng: m.lng });
-        });
-      } else {
-        const maxMatch = matches.reduce((max, current) =>
-          current.amount > max.amount ? current : max,
+    const leg = route.legs?.[0];
+    if (!leg) return { totalCost: 0, details: [], source: 'none' };
+
+    // 1) TollGuru (provider izin veriyorsa)
+    if (this.provider === 'tollguru' || this.provider === 'auto') {
+      const origin = { lat: leg.start_location.lat, lng: leg.start_location.lng };
+      const destination = { lat: leg.end_location.lat, lng: leg.end_location.lng };
+      const tg = await this.tollGuru.computeTolls({ origin, destination, vehicle });
+      if (tg && tg.totalCost > 0) {
+        // TollGuru barrier tipi toll'larda (kopru/tunel) name+lat+lng dolu doner;
+        // HGS system/gantry tipinde ise genelde isim/koordinat bos geliyor. Cozum:
+        // (1) rota polyline'i boyunca KGM seed'den sirali gise eslesmesi al,
+        // (2) isimsiz/koordinatsiz TollGuru detaylarini sirayla KGM eslesmeleriyle doldur.
+        await this.calculator.mergeDetailsWithRouteStations(route, tg.details);
+        // Yine de eksik kalani fuzzy isim eslesmesiyle son bir kez dene (safety net).
+        await this.calculator.enrichDetailsWithCoordinates(tg.details);
+        const withCoords = tg.details.filter((d) => d.lat && d.lng).length;
+        this.logger.log(
+          `Toll: tollguru total=${tg.totalCost} (${tg.details.length} stations, ${withCoords} with coords)`,
         );
-        totalCost += maxMatch.amount;
-        details.push({ name: maxMatch.name, highway, amount: maxMatch.amount, lat: maxMatch.lat, lng: maxMatch.lng });
+        return tg;
+      }
+      if (this.provider === 'tollguru') {
+        // Sadece TollGuru isteniyorsa ve bos donuyorsa 0 don; estimate fallback yok.
+        return { totalCost: 0, details: [], source: 'tollguru' };
       }
     }
 
-    if (details.length > 0 && process.env.NODE_ENV !== 'production') {
-      console.log(`Gişe eşleşmeleri (${details.length}), toplam: ${totalCost}₺`);
-    }
-
-    // Fall back to estimate if no stations matched
-    if (totalCost === 0) {
-      const estimatedCost = this.estimateTollCost(route, vehicle);
-      if (estimatedCost > 0) {
-        return {
-          totalCost: estimatedCost,
-          details: [
-            {
-              name: 'Otoyol / Köprü Kullanım Tahmini',
-              highway: 'KGM İstasyon Eşleşmesi Kurulamadı',
-              amount: estimatedCost,
-              lat: 0,
-              lng: 0,
-            },
-          ],
-        };
-      }
-      return { totalCost: 0, details: [] };
-    }
-
-    return { totalCost, details };
-  }
-
-  private getVehicleType(vehicle: Vehicle | null): string {
-    if (!vehicle) return 'CAR';
-    // Determine vehicle type based on weight
-    if (vehicle.weight < 400) return 'MOTORCYCLE';
-    if (vehicle.weight > 7500) return 'TRUCK';
-    if (vehicle.weight > 3500) return 'VAN';
-    return 'CAR';
-  }
-
-  private estimateTollCost(route: DirectionsRoute, vehicle: Vehicle | null): number {
-    const leg = route.legs[0];
-    const distanceKm = leg.distance.value / 1000;
-
-    // Base toll rate per km for Turkish highways
-    const ratePerKm = 0.15;
-    let tollCost = distanceKm * ratePerKm;
-
-    if (tollCost < 30) tollCost = 30;
-
-    return Math.round(tollCost * 100) / 100;
+    // 2) KGM local seed (+ estimate fallback icerir)
+    const local = await this.calculator.calculateFromLocalKGM(route, vehicle);
+    this.logger.log(`Toll: ${local.source} total=${local.totalCost} (${local.details.length})`);
+    return local;
   }
 
   async updateTollData(): Promise<{ imported: number; updated: number }> {
-    // Placeholder for KGM API integration
+    // KGM entegrasyonu placeholder (ayri is).
     return { imported: 0, updated: 0 };
   }
-}
-
-// Decode Google Maps encoded polyline string into lat/lng pairs
-function decodePolyline(encoded: string): { lat: number; lng: number }[] {
-  const points: { lat: number; lng: number }[] = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-
-  while (index < encoded.length) {
-    let shift = 0;
-    let result = 0;
-    let byte: number;
-
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    lat += result & 1 ? ~(result >> 1) : result >> 1;
-
-    shift = 0;
-    result = 0;
-
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    lng += result & 1 ? ~(result >> 1) : result >> 1;
-
-    points.push({ lat: lat / 1e5, lng: lng / 1e5 });
-  }
-
-  return points;
-}
-
-// Calculate distance in km between two lat/lng points using Haversine formula
-function haversineDistance(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const R = 6371; // Earth's radius in km
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const sinLat = Math.sin(dLat / 2);
-  const sinLng = Math.sin(dLng / 2);
-  const h = sinLat * sinLat + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinLng * sinLng;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
-function toRad(deg: number): number {
-  return (deg * Math.PI) / 180;
 }

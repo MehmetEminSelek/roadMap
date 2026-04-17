@@ -24,5 +24,6 @@
       "@common/*": ["./src/common/*"],
       "@prisma/*": ["./prisma/*"]
     }
-  }
+  },
+  "exclude": ["node_modules", "dist", "stress-tests", "tests"]
 }

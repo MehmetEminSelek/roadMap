@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { PrismaService } from './prisma/prisma.service';
+import { CommonModule } from './common/common.module';
 import googleMapsConfig from './config/google-maps.config';
 
 // Modules
@@ -55,6 +56,7 @@ function validateConfig(config: Record<string, unknown>) {
       ttl: 60000,
       limit: 60,
     }]),
+    CommonModule,
     PrismaModule,
     VehiclesModule,
     RoutesModule,

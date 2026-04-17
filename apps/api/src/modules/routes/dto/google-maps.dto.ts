@@ -110,3 +110,78 @@ export interface PlaceCandidate {
   rating?: number;
   user_ratings_total?: number;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Routes API v2 (computeRoutes) — https://routes.googleapis.com
+// ─────────────────────────────────────────────────────────────
+
+export interface RoutesV2LatLng {
+  latitude: number;
+  longitude: number;
+}
+
+export interface RoutesV2Location {
+  latLng: RoutesV2LatLng;
+}
+
+export interface RoutesV2Polyline {
+  encodedPolyline: string;
+}
+
+export interface RoutesV2Money {
+  currencyCode: string;
+  units?: string; // int64 as string in JSON
+  nanos?: number;
+}
+
+export interface RoutesV2TollInfo {
+  estimatedPrice?: RoutesV2Money[];
+}
+
+export interface RoutesV2Step {
+  distanceMeters?: number;
+  staticDuration?: string;
+  polyline?: RoutesV2Polyline;
+  startLocation?: RoutesV2Location;
+  endLocation?: RoutesV2Location;
+}
+
+export interface RoutesV2Leg {
+  distanceMeters?: number;
+  duration?: string; // "123s"
+  staticDuration?: string;
+  polyline?: RoutesV2Polyline;
+  startLocation?: RoutesV2Location;
+  endLocation?: RoutesV2Location;
+  steps?: RoutesV2Step[];
+}
+
+export interface RoutesV2TravelAdvisory {
+  tollInfo?: RoutesV2TollInfo;
+  fuelConsumptionMicroliters?: string;
+}
+
+export interface RoutesV2Route {
+  legs?: RoutesV2Leg[];
+  distanceMeters?: number;
+  duration?: string;
+  staticDuration?: string;
+  polyline?: RoutesV2Polyline;
+  description?: string;
+  travelAdvisory?: RoutesV2TravelAdvisory;
+  routeLabels?: string[];
+}
+
+export interface RoutesV2Response {
+  routes?: RoutesV2Route[];
+}
+
+/**
+ * Adapter output: eski DirectionsResult şeklinde rota + v2'ye özgü ham toll/fuel ipuçları.
+ * Downstream (routes.service.ts, tolls.service.ts, places.service.ts) `legacy` kısmını tüketmeye devam eder.
+ */
+export interface RouteWithAdvisory {
+  legacy: DirectionsResult;
+  tollInfo?: RoutesV2TollInfo;
+  fuelConsumptionMicroliters?: number;
+}

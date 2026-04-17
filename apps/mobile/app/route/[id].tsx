@@ -25,18 +25,11 @@ function decodePath(encoded: string): { latitude: number; longitude: number }[] 
   try {
     let str = encoded;
     if (str.startsWith('"') && str.endsWith('"')) str = str.slice(1, -1);
-    let index = 0, lat = 0, lng = 0;
-    const coords: { latitude: number; longitude: number }[] = [];
-    while (index < str.length) {
-      let b, shift = 0, result = 0;
-      do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-      lat += ((result & 1) ? ~(result >> 1) : (result >> 1));
-      shift = 0; result = 0;
-      do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-      lng += ((result & 1) ? ~(result >> 1) : (result >> 1));
-      coords.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+    const parsed = JSON.parse(str);
+    if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'object' && 'lat' in parsed[0]) {
+      return parsed.map((p: any) => ({ latitude: p.lat, longitude: p.lng }));
     }
-    return coords;
+    return [];
   } catch {
     return [];
   }

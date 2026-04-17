@@ -40,4 +40,9 @@ export default () => ({
   googleGemini: {
     apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   },
+  tollguru: {
+    apiKey: process.env.TOLLGURU_API_KEY || '',
+    // 'tollguru' | 'local' | 'auto' (default: auto -> tollguru -> local fallback)
+    provider: (process.env.TOLL_PROVIDER || 'auto').toLowerCase(),
+  },
 });
