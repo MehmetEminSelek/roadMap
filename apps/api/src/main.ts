@@ -16,13 +16,10 @@ async function bootstrap() {
   app.use(json({ limit: '10kb' }));
   app.use(urlencoded({ extended: true, limit: '10kb' }));
 
-  // CORS
-  const corsOrigins = process.env.CORS_ORIGINS;
-  if (!corsOrigins && process.env.NODE_ENV === 'production') {
-    throw new Error('CORS_ORIGINS must be set in production');
-  }
+  // CORS — Mobil uygulama native HTTP isteği gönderdiği için
+  // Origin header'ı olmaz. Tüm origin'lere izin veriyoruz.
   app.enableCors({
-    origin: corsOrigins ? corsOrigins.split(',').map(o => o.trim()) : 'http://localhost:3000',
+    origin: true,
     credentials: true,
   });
 
