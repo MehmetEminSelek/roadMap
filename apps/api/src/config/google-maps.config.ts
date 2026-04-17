@@ -45,4 +45,7 @@ export default () => ({
     // 'tollguru' | 'local' | 'auto' (default: auto -> tollguru -> local fallback)
     provider: (process.env.TOLL_PROVIDER || 'auto').toLowerCase(),
   },
+  redis: {
+    url: process.env.REDIS_URL || '',
+  },
 });

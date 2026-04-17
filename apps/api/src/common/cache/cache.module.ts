@@ -1,7 +1,9 @@
 import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
-import { Module } from '@nestjs/common';
+import { Module, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+
+const logger = new Logger('CacheConfig');
 
 @Module({
   imports: [
@@ -9,18 +11,26 @@ import { ConfigService } from '@nestjs/config';
       isGlobal: true,
       inject: [ConfigService],
       useFactory: async (cfg: ConfigService) => {
-        const url = cfg.get<string>('redis.url');
+        const url = cfg.get<string>('redis.url') || process.env.REDIS_URL;
         if (!url) {
-          // Redis yoksa no-op — local fallback (memory store)
+          logger.warn('⚠️  REDIS_URL tanımlı değil — memory cache kullanılıyor (veriler restart\'ta silinir)');
           return { ttl: 0 };
         }
-        return {
-          store: await redisStore({ url }),
-          ttl: 60_000, // default 1 min, per-call overrides apply
-        };
+        try {
+          const store = await redisStore({ url });
+          logger.log(`✅ Redis bağlantısı başarılı: ${url}`);
+          return {
+            store,
+            ttl: 60_000,
+          };
+        } catch (err) {
+          logger.error(`❌ Redis bağlantısı başarısız (${url}): ${err}. Memory cache fallback aktif.`);
+          return { ttl: 0 };
+        }
       },
     }),
   ],
   exports: [CacheModule],
 })
 export class AppCacheModule {}
+

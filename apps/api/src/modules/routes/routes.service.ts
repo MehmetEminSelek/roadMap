@@ -9,6 +9,7 @@ import { PlacesService } from '../places/places.service';
 import { RouteStatus } from '@prisma/client';
 import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
 import { normalizeTr } from '../../common/text/normalize-tr';
+import { buildCityCacheKey } from '../../common/text/extract-city';
 
 @Injectable()
 export class RoutesService {
@@ -24,18 +25,42 @@ export class RoutesService {
   async calculateRoute(createRouteDto: CreateRouteDto, userId: string): Promise<any> {
     const { origin, destination, vehicleId, stopsCount = 0 } = createRouteDto;
 
-    // Cache key: normalized origin|destination|vehicleId|climateControl
-    const cacheKey = `route:v1:${normalizeTr(origin)}|${normalizeTr(destination)}|${vehicleId ?? 'anon'}|${!!createRouteDto.hasClimateControl}`;
-    const cached = await this.cache.get<any>(cacheKey);
-    if (cached) {
-      // Cache'den dönerken kullanıcıya özel Route row'u oluştur (hesaplama bypass)
-      return this.persistAndReturnFromCache(cached, userId, vehicleId, createRouteDto);
+    // ── İKİ KATMANLI CACHE STRATEJİSİ ───────────────────────────────
+    // Katman 1: Tam adres cache (birebir aynı origin+destination+araç)
+    //   → Toll, fuel, alternatifler dahil tam sonuç. 6 saat TTL.
+    // Katman 2: İl bazlı cache ("istanbul|ankara" gibi)
+    //   → Google API yanıtı (allRoutes). 12 saat TTL.
+    //   → Farklı mahallelerden gelen kullanıcılar aynı Google API sonucunu paylaşır,
+    //     ama toll/fuel hesabı kullanıcının aracına göre yeniden yapılır.
+    // ─────────────────────────────────────────────────────────────────
+
+    const exactCacheKey = `route:exact:v1:${normalizeTr(origin)}|${normalizeTr(destination)}|${vehicleId ?? 'anon'}|${!!createRouteDto.hasClimateControl}`;
+    const cityCacheKey = buildCityCacheKey(origin, destination);
+
+    // Katman 1: Birebir aynı arama — tam cache hit
+    const exactCached = await this.cache.get<any>(exactCacheKey);
+    if (exactCached) {
+      console.log(`🎯 [Cache] Exact HIT: ${exactCacheKey}`);
+      return this.persistAndReturnFromCache(exactCached, userId, vehicleId, createRouteDto);
     }
 
-    // 1. Get routes from Google Routes API v2 (primary + alternatifler, tek cagride)
-    const allRoutes = await this.googleMaps.getRoutesWithAdvisory(origin, destination, 'driving', {
-      alternatives: true,
-    });
+    // Katman 2: İl bazlı Google API cache — API çağrısından tasarruf
+    let allRoutes: any[];
+    const cityCached = await this.cache.get<any>(cityCacheKey);
+
+    if (cityCached) {
+      console.log(`🏙️ [Cache] City-level HIT: ${cityCacheKey} — Google API çağrısı atlandı`);
+      allRoutes = cityCached;
+    } else {
+      console.log(`🌐 [Cache] MISS — Google API çağrısı yapılıyor: ${origin} → ${destination}`);
+      // 1. Get routes from Google Routes API v2 (primary + alternatifler, tek cagride)
+      allRoutes = await this.googleMaps.getRoutesWithAdvisory(origin, destination, 'driving', {
+        alternatives: true,
+      });
+
+      // İl bazlı cache'e yaz (12 saat TTL) — arka planda
+      this.cache.set(cityCacheKey, allRoutes, 12 * 60 * 60 * 1000).catch(() => {});
+    }
 
     if (!allRoutes.length || !allRoutes[0].legacy?.routes?.[0]) {
       throw new BadRequestException('Could not calculate route. Please check locations.');
@@ -75,8 +100,15 @@ export class RoutesService {
       }
     }
 
-    // 4-5. PARALLEL FAN-OUT: primary toll+fuel + tüm alternatifler aynı anda
+    // ─────────────────────────────────────────────────────────────────
+    // 4-8. FULL PARALLEL FAN-OUT
+    // Tüm ağır işler (toll, fuel, alternatifler, stops, rest areas)
+    // tek bir Promise.all içinde eş zamanlı çalışır.
+    // Toplam süre = en yavaş tek çağrı süresi
+    // ─────────────────────────────────────────────────────────────────
+
     const primaryTollPromise = this.tolls.calculateTollCost(route, vehicle, googleTollHint);
+
     const primaryFuelPromise = this.fuelAi.calculateFuelCost({
       distanceKm,
       durationSeconds: leg.duration.value,
@@ -85,6 +117,7 @@ export class RoutesService {
       vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
     });
 
+    // Her alternatif rota kendi içinde toll+fuel'ı paralel hesaplar
     const altTasks = allRoutes.slice(1).map(async (alt, idx) => {
       const i = idx + 1;
       try {
@@ -122,17 +155,33 @@ export class RoutesService {
       }
     });
 
-    // Primary + alts AYNI ANDA bekle — en yavaş çağrı kadar sürer
-    const [tollData, fuelResult, altsSettled] = await Promise.all([
+    // Stops promise (non-critical — hata verirse boş döner)
+    const stopsPromise = stopsCount > 0
+      ? this.places.getStopsAlongRoute(route, stopsCount).catch((e) => {
+          console.error('[RoutesService] Stops fetch failed:', e);
+          return [] as any[];
+        })
+      : Promise.resolve([] as any[]);
+
+    // Rest areas promise (non-critical — hata verirse boş döner)
+    const restAreasPromise = this.places.getRestAreasAlongRoute(route, 20).catch((e) => {
+      console.error('[RoutesService] Rest areas fetch failed:', e);
+      return [] as { name: string; lat: number; lng: number; type: string; rating?: number; vicinity?: string }[];
+    });
+
+    // ── TEK BİR AWAIT: her şey aynı anda çalışır ──
+    const [tollData, fuelResult, altsSettled, stops, nearbyRestAreas] = await Promise.all([
       primaryTollPromise,
       primaryFuelPromise,
       Promise.all(altTasks),
+      stopsPromise,
+      restAreasPromise,
     ]);
-    const alternatives = altsSettled.filter((a): a is NonNullable<typeof a> => !!a);
 
+    const alternatives = altsSettled.filter((a): a is NonNullable<typeof a> => !!a);
     const totalCost = tollData.totalCost + fuelResult.fuelCost;
 
-    // 6. Save route to database (transaction for data consistency)
+    // 6. DB kayıt — hesaplama bittiği anda persiste et
     const savedRoute = await this.prisma.$transaction(async (tx) => {
       return tx.route.create({
         data: {
@@ -168,21 +217,6 @@ export class RoutesService {
       });
     });
 
-    // 7. Get nearby places for stops if requested
-    let stops = [];
-    if (stopsCount > 0) {
-      stops = await this.places.getStopsAlongRoute(route, stopsCount);
-    }
-
-    // 8. Get rest areas along the route (20km radius)
-    let nearbyRestAreas: { name: string; lat: number; lng: number; type: string; rating?: number; vicinity?: string }[] = [];
-    try {
-      nearbyRestAreas = await this.places.getRestAreasAlongRoute(route, 20);
-    } catch (e) {
-      console.error('[RoutesService] Rest areas fetch failed:', e);
-      // Non-critical, continue without rest areas
-    }
-
     const result = {
       route: savedRoute,
       tollCost: tollData.totalCost,
@@ -197,8 +231,8 @@ export class RoutesService {
       alternatives,
     };
 
-    // Cache the compute result snapshot (6 hours)
-    await this.cache.set(cacheKey, {
+    // Tam sonuç cache — arka planda yaz (6 saat TTL)
+    this.cache.set(exactCacheKey, {
       tollData,
       fuelResult,
       totalCost,
@@ -209,7 +243,7 @@ export class RoutesService {
       alternatives,
       allRoutes,
       createRouteDto,
-    }, 6 * 60 * 60 * 1000);
+    }, 6 * 60 * 60 * 1000).catch(() => {});
 
     return result;
   }
@@ -223,7 +257,7 @@ export class RoutesService {
     vehicleId: string | undefined,
     createRouteDto: CreateRouteDto,
   ): Promise<any> {
-    const { tollData, fuelResult, totalCost, stops, nearbyRestAreas, duration, distance, allRoutes } = cached;
+    const { tollData, fuelResult, totalCost, stops, nearbyRestAreas, duration, distance, allRoutes, alternatives } = cached;
     const primary = allRoutes[0];
     const googleRoute = primary.legacy;
     const route = googleRoute.routes[0];
@@ -243,6 +277,12 @@ export class RoutesService {
         distance: leg.distance.value,
         duration: leg.duration.value,
         routeCoordinates: JSON.stringify(this.decodeStepsToCoords(leg.steps)),
+        routeStepsJson: JSON.stringify(leg.steps.map((s: any) => ({
+          encodedPolyline: s.polyline?.points || '',
+          congestion: s.congestion ?? 'FREE',
+          trafficRatio: s.traffic_ratio ?? 1,
+        }))),
+        alternativesJson: alternatives && alternatives.length > 0 ? (alternatives as any) : null,
         tollCost: tollData.totalCost,
         tollDetails: tollData.details as any,
         fuelCost: fuelResult.fuelCost,
@@ -265,7 +305,7 @@ export class RoutesService {
       nearbyRestAreas,
       duration,
       distance,
-      alternatives: cached.alternatives,
+      alternatives: alternatives || [],
     };
   }
 

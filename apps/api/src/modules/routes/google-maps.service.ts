@@ -182,7 +182,8 @@ export class GoogleMapsService {
           };
 
           if (travelMode === 'DRIVE') {
-            body.routingPreference = 'TRAFFIC_AWARE';
+            // TRAFFIC_AWARE_OPTIMAL: daha akıllı rota hesaplama, daha kaliteli alternatifler
+            body.routingPreference = 'TRAFFIC_AWARE_OPTIMAL';
             body.extraComputations = ['TOLLS', 'FUEL_CONSUMPTION'];
           }
 
@@ -201,7 +202,7 @@ export class GoogleMapsService {
             throw new BadRequestException('Route calculation failed: No routes found');
           }
 
-          return v2.routes.map((r) => {
+          const results = v2.routes.map((r) => {
             const legacy = this.adaptV2RouteToLegacy(r);
             const fuelStr = r.travelAdvisory?.fuelConsumptionMicroliters;
             return {
@@ -210,6 +211,31 @@ export class GoogleMapsService {
               fuelConsumptionMicroliters: fuelStr ? Number(fuelStr) : undefined,
             };
           });
+
+          // Alternatif kalite filtresi: ana rotaya göre
+          // mesafe >%50 fazla veya süre >%60 fazla olan alakasız rotaları ele
+          if (results.length > 1) {
+            const primaryDist = results[0].legacy.routes[0]?.legs[0]?.distance?.value || 0;
+            const primaryDur = results[0].legacy.routes[0]?.legs[0]?.duration?.value || 0;
+
+            const filtered = [results[0]];
+            for (let i = 1; i < results.length; i++) {
+              const altDist = results[i].legacy.routes[0]?.legs[0]?.distance?.value || 0;
+              const altDur = results[i].legacy.routes[0]?.legs[0]?.duration?.value || 0;
+
+              const distRatio = primaryDist > 0 ? altDist / primaryDist : 1;
+              const durRatio = primaryDur > 0 ? altDur / primaryDur : 1;
+
+              if (distRatio <= 1.5 && durRatio <= 1.6) {
+                filtered.push(results[i]);
+              } else {
+                console.log(`[GoogleMaps] Alternatif ${i} elendi — mesafe: ${(distRatio * 100).toFixed(0)}%, süre: ${(durRatio * 100).toFixed(0)}%`);
+              }
+            }
+            return filtered;
+          }
+
+          return results;
         },
         { maxRetries: 3, baseDelayMs: 1000 },
         'Google Routes v2',
