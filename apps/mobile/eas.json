@@ -28,10 +28,16 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://roadmap-production-75da.up.railway.app"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://roadmap-production-75da.up.railway.app"
+      }
     }
   },
   "submit": {
