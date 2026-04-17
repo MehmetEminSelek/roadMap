@@ -44,12 +44,12 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  // Start server
+  // Start server — Railway requires 0.0.0.0 binding
   const port = process.env.PORT || 3001;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 RoadMap API is running at: http://localhost:${port}`);
-  console.log(`Swagger docs available at: http://localhost:${port}/api/docs`);
+  console.log(`🚀 RoadMap API is running on port ${port}`);
+  console.log(`Swagger docs available at: /api/docs`);
 }
 
 bootstrap();
