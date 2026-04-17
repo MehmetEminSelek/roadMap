@@ -8,7 +8,13 @@ import {
   StyleSheet,
   View,
   Text,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -19,7 +25,7 @@ import type { Route } from '@/types/api';
 import { C } from '@/theme';
 import { buildStrokeColors, type RouteStep } from '@/utils/trafficColors';
 
-const MAP_PROVIDER = Platform.OS === 'ios' ? PROVIDER_DEFAULT : PROVIDER_GOOGLE;
+const MAP_PROVIDER = PROVIDER_DEFAULT;
 
 function decodePath(encoded: string): { latitude: number; longitude: number }[] {
   if (!encoded) return [];
@@ -44,6 +50,7 @@ export default function RouteDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ latitude: number; longitude: number }[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
 
   useEffect(() => { loadRoute(); }, [id]);
 
@@ -68,6 +75,61 @@ export default function RouteDetailScreen() {
     }
     return { coords, colors: undefined as undefined | string[] };
   }, [routeSteps, coords]);
+
+  // Parse alternatives from DB snapshot
+  const alternatives = useMemo(() => {
+    try {
+      const raw = (route as any)?.alternativesJson;
+      if (!raw) return [];
+      if (typeof raw === 'string') return JSON.parse(raw);
+      if (Array.isArray(raw)) return raw;
+    } catch {}
+    return [];
+  }, [route]);
+
+  // Unified route options
+  const options = useMemo(() => {
+    if (!route) return [] as any[];
+    const primary = {
+      label: 'Önerilen',
+      summary: 'Önerilen rota',
+      distance: route.distance,
+      duration: route.duration,
+      tollCost: Number(route.tollCost),
+      fuelCost: Number(route.fuelCost),
+      totalCost: Number(route.totalCost),
+      tollDetails: route.tollDetails ?? [],
+      coords,
+    };
+    const alts = alternatives.map((a: any, i: number) => ({
+      label: `Alt. ${i + 1}`,
+      summary: a.summary || `Alternatif ${i + 1}`,
+      distance: a.distance,
+      duration: a.duration,
+      tollCost: Number(a.tollCost ?? 0),
+      fuelCost: Number(a.fuelCost ?? 0),
+      totalCost: Number(a.totalCost ?? 0),
+      tollDetails: a.tollDetails ?? [],
+      coords: Array.isArray(a.routeCoordinates)
+        ? a.routeCoordinates.map((p: any) => ({ latitude: p.lat, longitude: p.lng }))
+        : [],
+    }));
+    return [primary, ...alts];
+  }, [route, alternatives, coords]);
+
+  const selected = options[selectedIdx] ?? options[0];
+
+  // Re-fit map when selection changes
+  useEffect(() => {
+    if (!selected || selected.coords.length < 2) return;
+    const t = setTimeout(() => {
+      mapRef.current?.fitToCoordinates(selected.coords, {
+        edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
+        animated: true,
+      });
+    }, 150);
+    return () => clearTimeout(t);
+  }, [selectedIdx, selected?.coords.length]);
 
   const loadRoute = async () => {
     try {
@@ -179,18 +241,35 @@ export default function RouteDetailScreen() {
             rotateEnabled={false}
             pitchEnabled={false}
             onMapReady={() => {
-              mapRef.current?.fitToCoordinates(coords, {
+              const fit = selected?.coords?.length ? selected.coords : coords;
+              mapRef.current?.fitToCoordinates(fit, {
                 edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
                 animated: false,
               });
             }}
           >
-            <Polyline
-              coordinates={trafficColors ? trafficCoords : coords}
-              strokeColors={trafficColors}
-              strokeColor={!trafficColors ? '#4A90E2' : undefined}
-              strokeWidth={4}
-            />
+            {/* Non-selected alternatives — dim */}
+            {options.map((opt, idx) => (
+              idx !== selectedIdx && opt.coords.length > 1 ? (
+                <Polyline
+                  key={`alt-${idx}`}
+                  coordinates={opt.coords}
+                  strokeColor="rgba(142,142,147,0.55)"
+                  strokeWidth={3}
+                  zIndex={1}
+                />
+              ) : null
+            ))}
+            {/* Selected route highlighted */}
+            {selected && selected.coords.length > 1 && (
+              <Polyline
+                coordinates={selectedIdx === 0 && trafficColors ? trafficCoords : selected.coords}
+                strokeColors={selectedIdx === 0 ? trafficColors : undefined}
+                strokeColor={selectedIdx === 0 && trafficColors ? undefined : '#0A84FF'}
+                strokeWidth={5}
+                zIndex={3}
+              />
+            )}
             <Marker coordinate={coords[0]}>
               <View style={[styles.dot, { backgroundColor: C.success }]} />
             </Marker>
@@ -198,6 +277,32 @@ export default function RouteDetailScreen() {
               <View style={[styles.dot, { backgroundColor: C.danger }]} />
             </Marker>
           </MapView>
+        )}
+
+        {/* Route option selector — compact 1/2/3 chips right-aligned */}
+        {options.length > 1 && (
+          <View style={styles.chipRow}>
+            <Text style={styles.chipHint}>Rota:</Text>
+            {options.map((opt, idx) => {
+              const isSel = idx === selectedIdx;
+              return (
+                <TouchableOpacity
+                  key={`opt-${idx}`}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    setSelectedIdx(idx);
+                  }}
+                  style={[styles.chip, isSel && styles.chipActive]}
+                >
+                  <Text style={[styles.chipText, isSel && styles.chipTextActive]}>{idx + 1}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+        {options.length > 1 && selected && (
+          <Text style={styles.chipSummary} numberOfLines={1}>{selected.summary}</Text>
         )}
 
         <View style={styles.content}>
@@ -222,26 +327,26 @@ export default function RouteDetailScreen() {
               {/* Gişe */}
               <View style={[styles.costBox, { borderLeftColor: C.success }]}>
                 <Text style={[styles.costLabel, { color: C.success }]}>GİŞE</Text>
-                <Text style={styles.costAmount}>{formatCurrency(route.tollCost)}</Text>
+                <Text style={styles.costAmount}>{formatCurrency(selected?.tollCost ?? route.tollCost)}</Text>
               </View>
               {/* Yakıt */}
               <View style={[styles.costBox, { borderLeftColor: C.fuel.PETROL }]}>
                 <Text style={[styles.costLabel, { color: C.fuel.PETROL }]}>YAKIT</Text>
-                <Text style={styles.costAmount}>{formatCurrency(route.fuelCost)}</Text>
+                <Text style={styles.costAmount}>{formatCurrency(selected?.fuelCost ?? route.fuelCost)}</Text>
               </View>
             </View>
             {/* Total */}
             <View style={styles.totalBox}>
               <Text style={styles.totalLabel}>Toplam</Text>
-              <Text style={styles.totalAmount}>{formatCurrency(route.totalCost)}</Text>
+              <Text style={styles.totalAmount}>{formatCurrency(selected?.totalCost ?? route.totalCost)}</Text>
             </View>
           </View>
 
           {/* ── Route Info Rows ────────────────── */}
           <View style={styles.card}>
             {[
-              { icon: <Clock size={18} color={C.textSoft} />, label: 'Süre', value: formatDuration(route.duration) },
-              { icon: <Navigation size={18} color={C.textSoft} />, label: 'Mesafe', value: `${(route.distance / 1000).toFixed(1)} km` },
+              { icon: <Clock size={18} color={C.textSoft} />, label: 'Süre', value: formatDuration(selected?.duration ?? route.duration) },
+              { icon: <Navigation size={18} color={C.textSoft} />, label: 'Mesafe', value: `${((selected?.distance ?? route.distance) / 1000).toFixed(1)} km` },
               ...(route.vehicle ? [
                 { icon: <Car size={18} color={C.textSoft} />, label: 'Araç', value: route.vehicle.name },
                 { icon: <Fuel size={18} color={C.textSoft} />, label: 'Yakıt Tipi', value: route.vehicle.fuelType },
@@ -263,15 +368,15 @@ export default function RouteDetailScreen() {
           </View>
 
           {/* ── Toll Details ───────────────────── */}
-          {route.tollDetails && route.tollDetails.length > 0 && (
+          {selected?.tollDetails && selected.tollDetails.length > 0 && (
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>Gişe Detayları</Text>
-              {route.tollDetails.map((toll, i) => (
+              {selected.tollDetails.map((toll: any, i: number) => (
                 <View
                   key={i}
                   style={[
                     styles.tollRow,
-                    i < (route.tollDetails?.length ?? 0) - 1 && styles.infoRowDivider,
+                    i < (selected.tollDetails?.length ?? 0) - 1 && styles.infoRowDivider,
                   ]}
                 >
                   <View style={styles.tollLeft}>
@@ -326,6 +431,51 @@ const styles = StyleSheet.create({
 
   // ── Map
   map: { width: '100%', height: 220 },
+
+  // ── Chip selector
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  chipHint: {
+    fontSize: 13,
+    color: C.textSoft,
+    fontWeight: '500',
+    marginRight: 4,
+  },
+  chip: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: C.border,
+  },
+  chipActive: {
+    backgroundColor: '#0A84FF',
+    borderColor: '#0A84FF',
+  },
+  chipText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.text,
+  },
+  chipTextActive: {
+    color: '#FFFFFF',
+  },
+  chipSummary: {
+    fontSize: 12,
+    color: C.textSoft,
+    textAlign: 'right',
+    paddingHorizontal: 16,
+    paddingTop: 6,
+  },
 
   // ── Content
   content: {

@@ -14,7 +14,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const MAP_PROVIDER = Platform.OS === 'ios' ? PROVIDER_DEFAULT : PROVIDER_GOOGLE;
+const MAP_PROVIDER = PROVIDER_DEFAULT;
 
 export default function ResultsScreen() {
   const params = useLocalSearchParams();
@@ -29,6 +29,7 @@ export default function ResultsScreen() {
   const [stopSuggestions, setStopSuggestions] = useState<any[]>([]);
   const [nearbyRestAreas, setNearbyRestAreas] = useState<NearbyRestArea[]>([]);
   const [alternatives, setAlternatives] = useState<any[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
 
   useEffect(() => {
     loadResult();
@@ -221,14 +222,64 @@ export default function ResultsScreen() {
     return { coords: decodedCoords, colors: undefined as undefined | string[] };
   }, [routeSteps, decodedCoords]);
 
-  // Filter toll markers with bbox safety (Turkey bounds)
+  // Unified route options: primary + alternatives
+  const options = useMemo(() => {
+    if (!route) return [] as any[];
+    const primary = {
+      label: 'Önerilen',
+      summary: (route as any).summary || 'Önerilen rota',
+      distance: route.distance,
+      duration: route.duration,
+      tollCost: route.tollCost,
+      fuelCost: route.fuelCost,
+      totalCost: route.totalCost,
+      tollDetails: route.tollDetails ?? [],
+      coords: decodedCoords,
+    };
+    const alts = alternatives.map((a, i) => ({
+      label: `Alt. ${i + 1}`,
+      summary: a.summary || `Alternatif ${i + 1}`,
+      distance: a.distance,
+      duration: a.duration,
+      tollCost: a.tollCost,
+      fuelCost: a.fuelCost,
+      totalCost: a.totalCost,
+      tollDetails: a.tollDetails ?? [],
+      coords: Array.isArray(a.routeCoordinates)
+        ? a.routeCoordinates.map((p: any) => ({ latitude: p.lat, longitude: p.lng }))
+        : [],
+    }));
+    return [primary, ...alts];
+  }, [route, decodedCoords, alternatives]);
+
+  const selected = options[selectedIdx] ?? options[0];
+
+  // Re-fit both maps when selection changes
+  useEffect(() => {
+    if (!selected || selected.coords.length < 2) return;
+    const t = setTimeout(() => {
+      previewMapRef.current?.fitToCoordinates(selected.coords, {
+        edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
+        animated: true,
+      });
+      if (mapExpanded) {
+        mapRef.current?.fitToCoordinates(selected.coords, {
+          edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
+          animated: true,
+        });
+      }
+    }, 150);
+    return () => clearTimeout(t);
+  }, [selectedIdx, selected?.coords.length, mapExpanded]);
+
+  // Filter toll markers with bbox safety (Turkey bounds) — follows selection
   const validTolls = useMemo(
-    () => (route?.tollDetails ?? []).filter(t =>
+    () => (selected?.tollDetails ?? []).filter((t: any) =>
       typeof t.lat === 'number' && typeof t.lng === 'number' &&
       t.lat > 35 && t.lat < 43 &&      // Türkiye kabaca
       t.lng > 25 && t.lng < 45
     ),
-    [route?.tollDetails],
+    [selected?.tollDetails],
   );
 
   if (loading || !route) {
@@ -278,7 +329,7 @@ export default function ResultsScreen() {
           <View style={styles.divider} />
 
           <Text style={styles.totalLabel}>Toplam Tahmini Maliyet</Text>
-          <Text style={styles.totalValue}>{formatCurrency(route.totalCost)}</Text>
+          <Text style={styles.totalValue}>{formatCurrency(selected?.totalCost ?? route.totalCost)}</Text>
         </View>
 
         {/* Map Preview Widget (8x4 aspect ratio approximately) */}
@@ -308,13 +359,28 @@ export default function ResultsScreen() {
               zoomEnabled={false}
               pitchEnabled={false}
               rotateEnabled={false}
+              showsUserLocation
             >
-              {animatedCoords.length > 0 && (
+              {/* Non-selected alternatives — dim */}
+              {options.map((opt, idx) => (
+                idx !== selectedIdx && opt.coords.length > 1 ? (
+                  <Polyline
+                    key={`preview-alt-${idx}`}
+                    coordinates={opt.coords}
+                    strokeColor="rgba(142,142,147,0.55)"
+                    strokeWidth={3}
+                    zIndex={1}
+                  />
+                ) : null
+              ))}
+              {/* Selected route — highlight (traffic colors if primary) */}
+              {selected && selected.coords.length > 1 && (
                 <Polyline
-                  coordinates={trafficColors ? trafficCoords : animatedCoords}
-                  strokeColors={trafficColors}
-                  strokeColor={!trafficColors ? '#4A90E2' : undefined}
-                  strokeWidth={4}
+                  coordinates={selectedIdx === 0 && trafficColors ? trafficCoords : selected.coords}
+                  strokeColors={selectedIdx === 0 ? trafficColors : undefined}
+                  strokeColor={selectedIdx === 0 && trafficColors ? undefined : '#0A84FF'}
+                  strokeWidth={5}
+                  zIndex={3}
                 />
               )}
 
@@ -357,6 +423,38 @@ export default function ResultsScreen() {
           )}
         </TouchableOpacity>
 
+        {/* Route Option Selector — compact 1/2/3 chips, right-aligned */}
+        {options.length > 1 && (
+          <View style={styles.optionChipRow}>
+            <Text style={styles.optionChipHint}>Rota:</Text>
+            {options.map((opt, idx) => {
+              const isSelected = idx === selectedIdx;
+              return (
+                <TouchableOpacity
+                  key={`opt-${idx}`}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    setSelectedIdx(idx);
+                  }}
+                  style={[styles.optionChip, isSelected && styles.optionChipActive]}
+                >
+                  <Text style={[styles.optionChipText, isSelected && styles.optionChipTextActive]}>
+                    {idx + 1}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Selected route summary label */}
+        {options.length > 1 && selected && (
+          <Text style={styles.selectedSummary} numberOfLines={1}>
+            {selected.summary}
+          </Text>
+        )}
+
         {/* Cost Breakdown List (Row Style) */}
         <Text style={styles.sectionTitle}>Maliyet Dağılımı</Text>
         <View style={styles.costRowsContainer}>
@@ -368,7 +466,7 @@ export default function ResultsScreen() {
               </View>
               <Text style={styles.costRowLabel}>Yakıt</Text>
             </View>
-            <Text style={styles.costRowValue}>{formatCurrency(route.fuelCost)}</Text>
+            <Text style={styles.costRowValue}>{formatCurrency(selected?.fuelCost ?? route.fuelCost)}</Text>
           </View>
 
           <View style={styles.costDivider} />
@@ -380,17 +478,17 @@ export default function ResultsScreen() {
                 <MapPin size={20} color="#FF9500" />
               </View>
               <Text style={styles.costRowLabel}>Gişe & Köprü</Text>
-              {(route.tollDetails && route.tollDetails.length > 0) && (
+              {(selected?.tollDetails && selected.tollDetails.length > 0) && (
                 tollExpanded ? <ChevronUp size={20} color="#8E8E93" style={{ marginLeft: 6 }} /> : <ChevronDown size={20} color="#8E8E93" style={{ marginLeft: 6 }} />
               )}
             </View>
-            <Text style={styles.costRowValue}>{formatCurrency(route.tollCost)}</Text>
+            <Text style={styles.costRowValue}>{formatCurrency(selected?.tollCost ?? route.tollCost)}</Text>
           </TouchableOpacity>
 
           {/* Expanded Toll Details */}
-          {tollExpanded && route.tollDetails && route.tollDetails.length > 0 && (
+          {tollExpanded && selected?.tollDetails && selected.tollDetails.length > 0 && (
             <View style={styles.tollDetailsContainer}>
-              {route.tollDetails.map((toll, idx) => (
+              {selected.tollDetails.map((toll: any, idx: number) => (
                 <View key={idx} style={styles.tollDetailItem}>
                   <View style={styles.tollDetailLeft}>
                     <Text style={styles.tollDetailName}>{toll.name}</Text>
@@ -412,7 +510,7 @@ export default function ResultsScreen() {
             </View>
             <View style={styles.detailTextContainer}>
               <Text style={styles.detailTitle}>Tahmini Süre</Text>
-              <Text style={styles.detailSubtitle}>{formatDuration(route.duration)}</Text>
+              <Text style={styles.detailSubtitle}>{formatDuration(selected?.duration ?? route.duration)}</Text>
             </View>
           </View>
 
@@ -422,7 +520,7 @@ export default function ResultsScreen() {
             </View>
             <View style={styles.detailTextContainer}>
               <Text style={styles.detailTitle}>Mesafe</Text>
-              <Text style={styles.detailSubtitle}>{formatDistance(route.distance)}</Text>
+              <Text style={styles.detailSubtitle}>{formatDistance(selected?.distance ?? route.distance)}</Text>
             </View>
           </View>
 
@@ -436,50 +534,6 @@ export default function ResultsScreen() {
             </View>
           </View>
         </View>
-
-        {/* Alternatives Section */}
-        {alternatives.length > 0 && (
-          <>
-            <Text style={styles.sectionTitle}>Alternatif Rotalar</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.alternativesContainer}>
-              {alternatives.map((alt, idx) => {
-                // Calculate difference
-                const costDiff = alt.totalCost - route.totalCost;
-                const timeDiff = alt.duration - route.duration;
-                
-                return (
-                  <View key={`alt-${idx}`} style={styles.alternativeCard}>
-                    <Text style={styles.alternativeName} numberOfLines={1}>{alt.summary}</Text>
-                    
-                    <View style={styles.alternativeDetailRow}>
-                      <Clock size={14} color="#8E8E93" />
-                      <Text style={styles.alternativeDetailText}>{alt.durationText}</Text>
-                      {Math.abs(timeDiff) > 60 && (
-                        <Text style={[styles.diffBadge, { backgroundColor: timeDiff > 0 ? '#FFF0F0' : '#E8F8F5', color: timeDiff > 0 ? '#FF3B30' : '#34C759' }]}>
-                          {timeDiff > 0 ? '+' : ''}{Math.round(timeDiff / 60)} dk
-                        </Text>
-                      )}
-                    </View>
-                    
-                    <View style={styles.alternativeDetailRow}>
-                      <Navigation size={14} color="#8E8E93" />
-                      <Text style={styles.alternativeDetailText}>{alt.distanceText}</Text>
-                    </View>
-                    
-                    <View style={styles.alternativeCostBox}>
-                      <Text style={styles.alternativeCostValue}>{formatCurrency(alt.totalCost)}</Text>
-                      {Math.abs(costDiff) > 1 && (
-                        <Text style={[styles.diffBadge, { backgroundColor: costDiff > 0 ? '#FFF0F0' : '#E8F8F5', color: costDiff > 0 ? '#FF3B30' : '#34C759' }]}>
-                          {costDiff > 0 ? '+' : ''}{formatCurrency(costDiff)}
-                        </Text>
-                      )}
-                    </View>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </>
-        )}
 
         {/* Bottom padding for scrolling */}
         <View style={{ height: 200 }} />
@@ -507,20 +561,35 @@ export default function ResultsScreen() {
             provider={MAP_PROVIDER}
             showsUserLocation
             onMapReady={() => {
-              if (decodedCoords.length > 0) {
-                mapRef.current?.fitToCoordinates(decodedCoords, {
+              const fitCoords = selected?.coords?.length ? selected.coords : decodedCoords;
+              if (fitCoords.length > 0) {
+                mapRef.current?.fitToCoordinates(fitCoords, {
                   edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
                   animated: true,
                 });
               }
             }}
           >
-            {animatedCoords.length > 0 && (
+            {/* Non-selected alternatives — dim */}
+            {options.map((opt, idx) => (
+              idx !== selectedIdx && opt.coords.length > 1 ? (
+                <Polyline
+                  key={`modal-alt-${idx}`}
+                  coordinates={opt.coords}
+                  strokeColor="rgba(142,142,147,0.55)"
+                  strokeWidth={3}
+                  zIndex={1}
+                />
+              ) : null
+            ))}
+            {/* Selected route — highlight */}
+            {selected && selected.coords.length > 1 && (
               <Polyline
-                coordinates={trafficColors ? trafficCoords : animatedCoords}
-                strokeColors={trafficColors}
-                strokeColor={!trafficColors ? '#4A90E2' : undefined}
+                coordinates={selectedIdx === 0 && trafficColors ? trafficCoords : selected.coords}
+                strokeColors={selectedIdx === 0 ? trafficColors : undefined}
+                strokeColor={selectedIdx === 0 && trafficColors ? undefined : '#0A84FF'}
                 strokeWidth={5}
+                zIndex={3}
               />
             )}
             {route.originLat && route.originLng && (
@@ -728,7 +797,7 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 32,
+    marginBottom: 12,
     backgroundColor: '#E5E5EA', // Grey placeholder color
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -1099,7 +1168,61 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontWeight: '400',
   },
-  // Alternatives
+  // Compact 1/2/3 chip selector, right-aligned beneath the map
+  optionChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  optionChipHint: {
+    fontSize: 13,
+    color: '#8E8E93',
+    fontWeight: '500',
+    marginRight: 4,
+  },
+  optionChip: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  optionChipActive: {
+    backgroundColor: '#0A84FF',
+    borderColor: '#0A84FF',
+    shadowColor: '#0A84FF',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  optionChipText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+  optionChipTextActive: {
+    color: '#FFFFFF',
+  },
+  selectedSummary: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#8E8E93',
+    textAlign: 'right',
+    marginBottom: 24,
+    paddingHorizontal: 2,
+  },
+  // Alternatives (legacy — kept for backward compatibility)
   alternativesContainer: {
     paddingBottom: 24,
     gap: 16,

@@ -3,14 +3,15 @@ import {
   ScrollView,
   RefreshControl,
   TouchableOpacity,
-  Platform,
   ActivityIndicator,
   StyleSheet,
   View,
   Text,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { PROVIDER_DEFAULT } from 'react-native-maps';
+import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import * as Location from 'expo-location';
 import { Navigation, Fuel, MapPin, Car, ChevronRight } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
@@ -32,6 +33,7 @@ interface Stats {
 
 export default function DashboardScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [stats, setStats] = useState<Stats | null>(null);
   const [recentRoutes, setRecentRoutes] = useState<Route[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -39,9 +41,8 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  // iOS: request location once
+  // Request location once (both platforms)
   const requestLocation = useCallback(async () => {
-    if (Platform.OS !== 'ios') return;
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status === 'granted') {
       try {
@@ -111,35 +112,38 @@ export default function DashboardScreen() {
         }
       >
         {/* ── Hero ──────────────────────────────── */}
-        {Platform.OS === 'ios' ? (
-          <View style={hero.mapHero}>
-            <MapView
-              style={StyleSheet.absoluteFillObject}
-              provider={PROVIDER_DEFAULT}
-              showsUserLocation
-              showsCompass={false}
-              scrollEnabled={false}
-              zoomEnabled={false}
-              pitchEnabled={false}
-              rotateEnabled={false}
-              region={userLocation
-                ? { ...userLocation, latitudeDelta: 0.15, longitudeDelta: 0.15 }
-                : { latitude: 39.0, longitude: 35.0, latitudeDelta: 12, longitudeDelta: 12 }
-              }
-            />
-            <View style={hero.overlay} />
-            <View style={hero.textOverlay}>
-              <Text style={hero.greeting}>MERHABA</Text>
-              <Text style={hero.name}>{user?.name || 'Kullanıcı'}</Text>
-            </View>
-          </View>
-        ) : (
-          <View style={hero.androidHero}>
+        <View style={[hero.mapHero, { paddingTop: insets.top, height: 260 + insets.top }]}>
+          <MapView
+            style={StyleSheet.absoluteFillObject}
+            provider={PROVIDER_DEFAULT}
+            showsUserLocation
+            showsCompass={false}
+            scrollEnabled={false}
+            zoomEnabled={false}
+            pitchEnabled={false}
+            rotateEnabled={false}
+            region={userLocation
+              ? { ...userLocation, latitudeDelta: 0.15, longitudeDelta: 0.15 }
+              : { latitude: 39.0, longitude: 35.0, latitudeDelta: 12, longitudeDelta: 12 }
+            }
+          />
+          <View style={hero.overlay} />
+          <View style={[hero.statusBarScrim, { height: insets.top }]} />
+          <View style={hero.textOverlay}>
             <Text style={hero.greeting}>MERHABA</Text>
             <Text style={hero.name}>{user?.name || 'Kullanıcı'}</Text>
-            <Text style={hero.tagline}>Yolculuk özetine hoş geldin</Text>
           </View>
-        )}
+          {/* Bottom gradient fade into content bg */}
+          <Svg height={90} width="100%" style={hero.fade} pointerEvents="none">
+            <Defs>
+              <LinearGradient id="heroFade" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={C.bg} stopOpacity="0" />
+                <Stop offset="1" stopColor={C.bg} stopOpacity="1" />
+              </LinearGradient>
+            </Defs>
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroFade)" />
+          </Svg>
+        </View>
 
         {/* ── Period Stats (Weekly/Monthly) ──────── */}
         {hasData && (
@@ -281,12 +285,24 @@ export default function DashboardScreen() {
 
 const hero = StyleSheet.create({
   mapHero: {
-    height: 260,
     overflow: 'hidden',
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(255,255,255,0.35)',
+  },
+  statusBarScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  fade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   textOverlay: {
     position: 'absolute',

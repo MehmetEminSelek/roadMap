@@ -50,10 +50,7 @@ export class RoutesService {
     // 2. Fetch vehicle details implicitly if vehicleId is provided
     const vehicle = vehicleId ? await this.prisma.vehicle.findUnique({ where: { id: vehicleId } }) : null;
 
-    // 3. Calculate toll cost (TollGuru -> KGM-local -> km estimate fallback zinciri)
-    const tollData = await this.tolls.calculateTollCost(route, vehicle, googleTollHint);
-
-    // 4. Look up EPA fuel economy data for this vehicle (if available)
+    // 3. EPA lookup (gerekiyorsa) — primary VE tüm alternatifler için ortak
     const distanceKm = leg.distance.value / 1000;
     let epaFuelEconomyL100: number | undefined;
 
@@ -66,7 +63,7 @@ export class RoutesService {
           },
           fuelType: vehicle.fuelType,
         },
-        orderBy: { year: 'desc' }, // en güncel trim
+        orderBy: { year: 'desc' },
         select: { fuelEconomyL100: true },
       });
 
@@ -78,20 +75,16 @@ export class RoutesService {
       }
     }
 
-    // 5. Predict fuel cost (EPA verisi varsa AI bypass edilir, yoksa AI kullanılır)
-    const fuelResult = await this.fuelAi.calculateFuelCost({
+    // 4-5. PARALLEL FAN-OUT: primary toll+fuel + tüm alternatifler aynı anda
+    const primaryTollPromise = this.tolls.calculateTollCost(route, vehicle, googleTollHint);
+    const primaryFuelPromise = this.fuelAi.calculateFuelCost({
       distanceKm,
       durationSeconds: leg.duration.value,
       hasClimateControl: createRouteDto.hasClimateControl,
-      // EPA L/100km → toplam litre (bu mesafe için)
       averageConsumption: epaFuelEconomyL100 ? (distanceKm * epaFuelEconomyL100) / 100 : undefined,
       vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
     });
 
-    // 5. Calculate total cost
-    const totalCost = tollData.totalCost + fuelResult.fuelCost;
-
-    // 5b. Compute alternatives in parallel (skip primary, same vehicle assumptions)
     const altTasks = allRoutes.slice(1).map(async (alt, idx) => {
       const i = idx + 1;
       try {
@@ -128,7 +121,16 @@ export class RoutesService {
         return null;
       }
     });
-    const alternatives = (await Promise.all(altTasks)).filter((a): a is NonNullable<typeof a> => !!a);
+
+    // Primary + alts AYNI ANDA bekle — en yavaş çağrı kadar sürer
+    const [tollData, fuelResult, altsSettled] = await Promise.all([
+      primaryTollPromise,
+      primaryFuelPromise,
+      Promise.all(altTasks),
+    ]);
+    const alternatives = altsSettled.filter((a): a is NonNullable<typeof a> => !!a);
+
+    const totalCost = tollData.totalCost + fuelResult.fuelCost;
 
     // 6. Save route to database (transaction for data consistency)
     const savedRoute = await this.prisma.$transaction(async (tx) => {
@@ -151,6 +153,7 @@ export class RoutesService {
             congestion: s.congestion ?? 'FREE',
             trafficRatio: s.traffic_ratio ?? 1,
           }))),
+          alternativesJson: alternatives.length > 0 ? (alternatives as any) : null,
           tollCost: tollData.totalCost,
           tollDetails: tollData.details as any,
           fuelCost: fuelResult.fuelCost,

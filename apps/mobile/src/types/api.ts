@@ -55,6 +55,7 @@ export interface Route {
   createdAt: string;
   routeCoordinates?: string;
   routeStepsJson?: any; // Per-step traffic data (Phase 2)
+  alternativesJson?: any; // Alternative routes snapshot (null on legacy records)
 }
 
 export interface FavoriteRoute {

@@ -22,8 +22,9 @@ import { routeService } from '@/services/routeService';
 import type { Vehicle } from '@/types/api';
 import { useAutocomplete } from '@/queries/autocomplete';
 import { SuggestionRow } from '@/components/SuggestionRow';
+import { useUserLocation } from '@/hooks/useUserLocation';
 
-const MAP_PROVIDER = Platform.OS === 'ios' ? PROVIDER_DEFAULT : PROVIDER_GOOGLE;
+const MAP_PROVIDER = PROVIDER_DEFAULT;
 
 const TURKEY_REGION = {
   latitude: 39.0,
@@ -34,6 +35,7 @@ const TURKEY_REGION = {
 
 export default function CalculateScreen() {
   const insets = useSafeAreaInsets();
+  const { location: userLocation } = useUserLocation();
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -170,12 +172,18 @@ export default function CalculateScreen() {
   return (
     <View style={styles.root}>
       <MapView
+        key={userLocation ? 'user' : 'default'}
         style={StyleSheet.absoluteFillObject}
         provider={MAP_PROVIDER}
-        initialRegion={TURKEY_REGION}
+        initialRegion={
+          userLocation
+            ? { ...userLocation, latitudeDelta: 0.08, longitudeDelta: 0.08 }
+            : TURKEY_REGION
+        }
         scrollEnabled
         zoomEnabled
         showsUserLocation
+        showsMyLocationButton
         showsCompass={false}
       />
 
@@ -227,7 +235,7 @@ export default function CalculateScreen() {
             <FlatList
               data={suggestions}
               keyExtractor={keyExtractor}
-              keyboardShouldPersistTaps="handled"
+              keyboardShouldPersistTaps="always"
               style={{ maxHeight: 200 }}
               renderItem={renderSuggestion}
               initialNumToRender={6}

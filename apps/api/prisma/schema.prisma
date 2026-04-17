@@ -135,6 +135,7 @@ model Route {
   duration            Int           // Saniye
   routeCoordinates    String?       // GeoJSON
   routeStepsJson      Json?         // Per-step traffic data (Phase 2)
+  alternativesJson    Json?         // Alternative routes snapshot
 
   // Hesaplanan maliyetler
   tollCost            Decimal       @db.Decimal(10, 2)
