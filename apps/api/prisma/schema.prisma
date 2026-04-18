@@ -72,15 +72,24 @@ model VehicleTrim {
   id              String        @id @default(cuid())
   modelId         String
   year            Int
+  variantSlug     String        // URL slug "1-0-essential" — paket kimliği
   fuelType        FuelType
   engineCapacity  Int?          // cc (displ * 1000)
   transmission    Transmission?
-  fuelEconomyL100 Float?        // L/100km (235.214 / comb08_mpg)
+  fuelEconomyL100 Float?        // L/100km
+
+  // Ek alanlar (arabalar.com.tr scraper kaynağı)
+  enginePowerHp   Int?          // HP
+  torqueNm        Int?          // Nm
+  tankCapacityL   Int?          // L — menzil hesabı UI için
+  weightKg        Int?          // kg — Vehicle.weight muadili, trim varsayılanı
+  variantName     String?       // "1.0 Essential" — UI göstergesi
 
   vehicleModel    VehicleModel  @relation(fields: [modelId], references: [id], onDelete: Cascade)
 
-  @@unique([modelId, year, fuelType, engineCapacity])
+  @@unique([modelId, year, variantSlug])
   @@index([modelId])
+  @@index([modelId, year])
 }
 
 // ==========================================
