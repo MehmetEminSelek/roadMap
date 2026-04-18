@@ -35,4 +35,4 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 
 # Start: try migration, then always start server
-CMD sh -c "npx prisma migrate deploy 2>&1 || echo 'Migration skipped'; node dist/src/main.js"
+CMD sh -c "npx prisma migrate deploy 2>&1 || echo 'Migration skipped'; node dist/main.js"
