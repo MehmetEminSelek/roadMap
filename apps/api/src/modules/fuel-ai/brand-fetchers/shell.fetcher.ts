@@ -3,24 +3,42 @@ import { HttpService } from '@nestjs/axios';
 import { BrandPriceFetcher, BrandPrices } from './base.fetcher';
 
 /**
- * Shell Türkiye — TODO: Public endpoint belirlendiğinde `fetch()` doldurulacak.
+ * Shell Türkiye — NOT IMPLEMENTED (investigation complete, approach requires
+ * headless browser).
  *
- * Denenebilecek kaynaklar:
- *   - https://www.shell.com.tr/motorists/shell-fuels/fuel-pricing.html
- *     (client-side rendered; JSON API kullanıyor — DevTools → Network ile yakala)
- *   - 3rd party aggregator: akaryakit-fiyatlari.com.tr, hepsiyakit.com
+ * Araştırma sonuçları:
+ *   - Ana sayfa (www.shell.com.tr/suruculer/...) sadece iframe barındırıyor.
+ *   - Gerçek fiyat tablosu: https://www.turkiyeshell.com/pompatest/
+ *   - ASP.NET WebForms + DevExpress ASPxClientGridView kullanılıyor.
+ *   - Sayfa ilk yüklendiğinde fiyat yok ("Fiyatlar Yükleniyor…").
+ *   - Fiyat tablosu (cb_all_grdPrices) bir DevExpress callback sonrası dolduruluyor.
+ *   - `__CALLBACKID=cb_all` POST'u 200 dönüyor ama grid boş kalıyor (inner
+ *     callback tetiklenmiyor). cb_all$grdPrices callback'i 'generalError: Unable
+ *     to read beyond the end of the stream' veriyor — büyük ihtimalle
+ *     CallbackState'in bir önceki postback sonrası dinamik değeri gerekli.
+ *   - Reverse-engineering fizibil değil; Puppeteer/Playwright önerilir.
  *
- * Şu an null döner → orchestrator "eski / default fiyat" kullanır.
+ * Doğru yaklaşım seçenekleri:
+ *   a) Puppeteer ile headless Chrome: sayfayı aç, il seç, tabloyu DOM'dan oku.
+ *   b) Üçüncü parti aggregator (hepsiyakit.com, akaryakit-fiyatlari.com.tr).
+ *   c) Shell Türkiye'nin yayınladığı günlük PDF/Excel (varsa).
+ *
+ * Şu an null dönüyor → orchestrator "marka default fiyat / OPET ortalaması"
+ * fallback'ini kullanıyor. Kullanıcı Shell seçerse yaklaşık doğru fiyat görür.
  */
 @Injectable()
 export class ShellFetcher extends BrandPriceFetcher {
   readonly brandId = 'shell';
   readonly brandName = 'Shell';
 
-  constructor(http: HttpService) { super(http); }
+  constructor(http: HttpService) {
+    super(http);
+  }
 
   async fetch(_provinceCode = 34): Promise<BrandPrices | null> {
-    this.logger.debug('Shell fetcher henüz implement edilmedi (endpoint bekleniyor).');
+    this.logger.debug(
+      'Shell fetcher devre dışı: turkiyeshell.com/pompatest DevExpress callback gerektiriyor, headless browser şart.',
+    );
     return null;
   }
 }
