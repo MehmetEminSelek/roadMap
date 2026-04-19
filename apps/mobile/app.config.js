@@ -14,13 +14,18 @@ export default {
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.roadmap.app",
+      bundleIdentifier: "com.masrafim.roadapp",
+      buildNumber: "1",
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "Konumunuza erişim gereklidir."
       }
     },
     android: {
-      package: "com.roadmap.app",
+      package: "com.masrafim.roadapp",
+      versionCode: 1,
+      blockedPermissions: [
+        "android.permission.RECORD_AUDIO"
+      ],
       softwareKeyboardLayoutMode: "resize",
       config: {
         googleMaps: {
@@ -36,6 +41,16 @@ export default {
         "expo-location",
         {
           locationAlwaysAndWhenInUsePermission: "Rotanı mevcut konumundan başlatabilmek için konumuna erişmemiz gerekiyor."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          android: {
+            compileSdkVersion: 35,
+            targetSdkVersion: 35,
+            buildToolsVersion: "35.0.0"
+          }
         }
       ]
     ],

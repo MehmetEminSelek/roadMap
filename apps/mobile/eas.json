@@ -34,7 +34,6 @@
       }
     },
     "production": {
-      "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://roadmap-production-75da.up.railway.app"
       }

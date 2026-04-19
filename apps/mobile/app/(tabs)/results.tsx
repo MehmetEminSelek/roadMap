@@ -406,7 +406,7 @@ export default function ResultsScreen() {
               )}
 
               {/* Toll Gate Markers (bbox-filtered) */}
-              {validTolls.map((toll, idx) => (
+              {validTolls.map((toll: any, idx: number) => (
                 <Marker key={`toll-preview-${idx}`} coordinate={{ latitude: toll.lat, longitude: toll.lng }}>
                   <View style={styles.tollMarker}>
                     <Text style={styles.tollMarkerText}>₺</Text>
@@ -616,7 +616,7 @@ export default function ResultsScreen() {
             )}
 
             {/* Toll Gate Markers with Labels (bbox-filtered) */}
-            {validTolls.map((toll, idx) => (
+            {validTolls.map((toll: any, idx: number) => (
               <Marker key={`modal-toll-${idx}`} coordinate={{ latitude: toll.lat, longitude: toll.lng }}>
                 <View style={styles.tollMarkerLarge}>
                   <Text style={styles.tollMarkerTextLarge}>₺</Text>

@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "93887f5c-a688-4660-8d39-8dd08bddb49c"
+      }
+    },
+    "android": {
+      "package": "com.memik.roadmapapi"
+    }
+  }
+}
