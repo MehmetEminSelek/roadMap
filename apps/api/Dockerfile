@@ -34,5 +34,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 
-# Start: try migration, then always start server
-CMD sh -c "npx prisma migrate deploy 2>&1 || echo 'Migration skipped'; node dist/main.js"
+# Start: migration MUST succeed before server starts, aksi halde tablo eksik
+# kalıp P2021 hatasıyla runtime'da patlıyor.
+CMD sh -c "npx prisma migrate deploy && node dist/main.js"
