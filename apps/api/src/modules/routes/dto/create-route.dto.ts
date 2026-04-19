@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsInt, Min, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsInt, Min, Max, IsBoolean, IsNumber } from 'class-validator';
 
 class CreateRouteDto {
   @IsString()
@@ -35,6 +35,20 @@ class CreateRouteDto {
   @IsBoolean()
   @IsOptional()
   hasClimateControl?: boolean;
+
+  /** Yola çıkarken depodaki yakıt yüzdesi (0-100). İkmal simülasyonu için. */
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  initialFuelPct?: number;
+
+  /** Depoda kalan yüzdede ikmal tetiklensin (default %10). */
+  @IsNumber()
+  @Min(0)
+  @Max(50)
+  @IsOptional()
+  reserveThresholdPct?: number;
 }
 
 export { CreateRouteDto };

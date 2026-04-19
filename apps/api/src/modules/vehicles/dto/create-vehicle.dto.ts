@@ -1,4 +1,4 @@
-import { IsString, IsInt, IsBoolean, IsEnum, Min, Max } from 'class-validator';
+import { IsString, IsInt, IsBoolean, IsEnum, IsIn, IsOptional, Min, Max } from 'class-validator';
 import { FuelType, Transmission } from '@prisma/client';
 
 class CreateVehicleDto {
@@ -32,6 +32,12 @@ class CreateVehicleDto {
 
   @IsBoolean()
   hasClimateControl?: boolean;
+
+  /** İkmal simülasyonunda kullanılacak yakıt markası. Null → Opet default. */
+  @IsString()
+  @IsIn(['opet', 'shell', 'po', 'bp'])
+  @IsOptional()
+  preferredFuelBrand?: string;
 }
 
 export { CreateVehicleDto };

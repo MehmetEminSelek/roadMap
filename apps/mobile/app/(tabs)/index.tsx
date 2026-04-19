@@ -19,6 +19,7 @@ import { routeService } from '@/services/routeService';
 import { vehicleService } from '@/services/vehicleService';
 import type { Route, Vehicle } from '@/types/api';
 import { C } from '@/theme';
+import { FuelPriceCarousel } from '@/components/FuelPriceCarousel';
 
 interface Stats {
   totalRoutes: number;
@@ -204,6 +205,15 @@ export default function DashboardScreen() {
             </View>
           )}
         </View>
+
+        {/* ── Yakıt Fiyatları Carousel ─────── */}
+        <View style={[styles.section, { marginTop: 24 }]}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Yakıt Fiyatları</Text>
+            <Text style={styles.sectionHint}>Yana kaydır</Text>
+          </View>
+        </View>
+        <FuelPriceCarousel />
 
         {/* ── Recent Routes ─────────────────── */}
         {recentRoutes.length > 0 && (
@@ -466,6 +476,13 @@ const styles = StyleSheet.create({
     color: C.gold,
     fontWeight: '600',
     fontSize: 14,
+  },
+  sectionHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.textSoft,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 
   // ── Route list

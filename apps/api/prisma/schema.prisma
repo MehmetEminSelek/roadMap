@@ -42,6 +42,7 @@ model Vehicle {
   weight              Int       // kg (boş ağırlık)
   transmission        Transmission
   hasClimateControl   Boolean   @default(true)
+  preferredFuelBrand  String?   // 'opet' | 'shell' | 'po' | 'bp' — null ise Opet default
   createdAt           DateTime  @default(now())
 
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -210,6 +211,26 @@ model FavoriteRoute {
 
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   route       Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// Fuel Price Models (per-province, per-brand)
+// ==========================================
+model BrandProvincePrice {
+  id            String    @id @default(cuid())
+  brandId       String                          // 'opet' | 'shell' | 'po' | 'bp'
+  provinceCode  Int                             // 1-81 (plaka)
+  petrol        Float?
+  diesel        Float?
+  lpg           Float?
+  live          Boolean   @default(false)       // fetch başarılı mı, yoksa fallback mı
+  source        String?                         // 'opet-api' | 'shell-web' | 'aggregator:hepsiyakit'
+  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now())
+
+  @@unique([brandId, provinceCode])
+  @@index([provinceCode])
+  @@index([updatedAt])
 }
 
 model FavoritePlace {

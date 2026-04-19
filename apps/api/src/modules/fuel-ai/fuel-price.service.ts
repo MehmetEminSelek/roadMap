@@ -1,7 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HttpService } from '@nestjs/axios';
-import { firstValueFrom } from 'rxjs';
+import { PrismaService } from '../../prisma/prisma.service';
+import { BrandPriceFetcher, BrandPrices } from './brand-fetchers/base.fetcher';
+import { OpetFetcher } from './brand-fetchers/opet.fetcher';
+import { ShellFetcher } from './brand-fetchers/shell.fetcher';
+import { PetrolOfisiFetcher } from './brand-fetchers/po.fetcher';
+import { BpFetcher } from './brand-fetchers/bp.fetcher';
 
 export interface FuelPrices {
   petrol: number;
@@ -9,92 +13,214 @@ export interface FuelPrices {
   lpg: number;
 }
 
+export interface BrandPriceSnapshot {
+  brandId: string;
+  brandName: string;
+  prices: FuelPrices;
+  live: boolean;
+  updatedAt: string; // ISO
+}
+
+const DEFAULT_PROVINCE = 34; // İstanbul — backward compat + carousel default
+const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 saat
+const STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000;  // boot'ta 6 saatten eskiyse refresh
+
 @Injectable()
 export class FuelPriceService implements OnModuleInit {
   private readonly logger = new Logger(FuelPriceService.name);
-  private currentPrices: FuelPrices;
   private readonly defaultPrice: number;
+  private readonly defaultLpg: number;
+
+  /** Backward-compat için Opet'i "primary" olarak tutuyoruz. */
+  private readonly PRIMARY_BRAND = 'opet';
+
+  private readonly fetchers: BrandPriceFetcher[];
+  private readonly fetcherById = new Map<string, BrandPriceFetcher>();
+
+  /**
+   * In-memory lookup cache: `${brandId}:${provinceCode}` → BrandPrices.
+   * DB'den refreshAll sonrası doldurulur; her getBrandPrice çağrısında DB hit
+   * etmemek için.
+   */
+  private priceCache = new Map<string, BrandPrices>();
+  private lastRefreshAt: Date | null = null;
 
   constructor(
-    private configService: ConfigService,
-    private httpService: HttpService,
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+    opet: OpetFetcher,
+    shell: ShellFetcher,
+    po: PetrolOfisiFetcher,
+    bp: BpFetcher,
   ) {
-    this.defaultPrice = this.configService.get<number>('FUEL_PRICE_TL', 40.00);
-    this.currentPrices = {
-      petrol: this.defaultPrice,
-      diesel: this.defaultPrice,
-      lpg: this.defaultPrice * 0.5, // Approx LPG ratio
-    };
+    this.fetchers = [opet, shell, po, bp];
+    for (const f of this.fetchers) this.fetcherById.set(f.brandId, f);
+
+    // ConfigService env'i string döner; Number() ile coerce etmezsek
+    // response'ta fiyatlar string olarak sızıyor ve mobile `formatPrice` bozuluyor.
+    const rawDefault = this.configService.get<string | number>('FUEL_PRICE_TL', 40.0);
+    const parsed = Number(rawDefault);
+    this.defaultPrice = Number.isFinite(parsed) && parsed > 0 ? parsed : 40.0;
+    this.defaultLpg = this.defaultPrice * 0.5;
   }
 
   async onModuleInit() {
-    // Initial fetch
-    await this.fetchLatestPrices();
-    
-    // Update prices every hour
+    // DB'den mevcut cache'i yükle
+    await this.loadCacheFromDb();
+
+    // Son fetch 6+ saatlik ise refresh tetikle; değilse pas geç
+    const newest = await this.prisma.brandProvincePrice.findFirst({
+      orderBy: { updatedAt: 'desc' },
+      select: { updatedAt: true },
+    });
+    const age = newest ? Date.now() - newest.updatedAt.getTime() : Infinity;
+    if (age > STALE_THRESHOLD_MS) {
+      this.logger.log(`DB cache ${Math.round(age / 3600_000)}h eski → refresh…`);
+      this.refreshAll().catch((e) => this.logger.error(`Initial refresh failed: ${e.message}`));
+    } else {
+      this.logger.log(`DB cache taze (${Math.round(age / 60_000)}dk) — refresh'e gerek yok.`);
+    }
+
     setInterval(() => {
-      this.fetchLatestPrices();
-    }, 60 * 60 * 1000);
+      this.refreshAll().catch((e) => this.logger.error(`Periodic refresh failed: ${e.message}`));
+    }, REFRESH_INTERVAL_MS);
   }
 
-  async fetchLatestPrices() {
-    this.logger.log('Fetching latest fuel prices from Opet API...');
+  /** Tüm markaları paralel olarak çeker ve DB'ye upsert eder. */
+  async refreshAll() {
+    this.logger.log(`Refreshing fuel prices for ${this.fetchers.length} brand(s)…`);
+    await Promise.all(this.fetchers.map((f) => this.refreshOne(f)));
+    await this.loadCacheFromDb();
+    this.lastRefreshAt = new Date();
+    this.logger.log('Refresh complete.');
+  }
+
+  private async refreshOne(fetcher: BrandPriceFetcher) {
     try {
-      // 34 = Istanbul province code
-      const response = await firstValueFrom(
-        this.httpService.get('https://api.opet.com.tr/api/fuelprices/prices?ProvinceCode=34', {
-          timeout: 10000,
-        })
-      );
-
-      const data = response.data;
-      if (Array.isArray(data) && data.length > 0) {
-        // Find average or use specific district (e.g., center)
-        const prices = data[0].prices; // prices array contains products
-        
-        let newPetrol = this.defaultPrice;
-        let newDiesel = this.defaultPrice;
-        let newLpg = this.defaultPrice * 0.5;
-
-        // Extract by product name or id
-        for (const item of prices) {
-          const name = (item.productName || '').toLowerCase();
-          const amount = item.amount || 0;
-          
-          if (amount > 0) {
-            if (name.includes('kurşunsuz') || name.includes('benzin')) {
-              newPetrol = amount;
-            } else if (name.includes('motorin') || name.includes('dizel') || name.includes('diesel') || name.includes('eco force')) {
-              newDiesel = amount;
-            } else if (name.includes('lpg') || name.includes('otogaz')) {
-              newLpg = amount;
-            }
-          }
-        }
-
-        this.currentPrices = {
-          petrol: newPetrol,
-          diesel: newDiesel,
-          lpg: newLpg,
-        };
-        this.logger.log(`Fuel prices updated: Petrol=${newPetrol}₺, Diesel=${newDiesel}₺, LPG=${newLpg}₺`);
-      } else {
-        this.logger.warn('Opet API returned unexpected data format. Keeping current prices.');
+      const map = await fetcher.fetchAll();
+      if (!map || map.size === 0) {
+        this.logger.warn(`${fetcher.brandName}: fetchAll boş döndü, DB'ye yazma yok.`);
+        return;
       }
-    } catch (error) {
-      this.logger.error(`Failed to fetch fuel prices: ${error.message}. Keeping current prices.`);
+
+      const ops: Promise<unknown>[] = [];
+      for (const [provinceCode, prices] of map.entries()) {
+        ops.push(
+          this.prisma.brandProvincePrice.upsert({
+            where: { brandId_provinceCode: { brandId: fetcher.brandId, provinceCode } },
+            create: {
+              brandId: fetcher.brandId,
+              provinceCode,
+              petrol: prices.petrol,
+              diesel: prices.diesel,
+              lpg: prices.lpg,
+              live: true,
+              source: `${fetcher.brandId}-api`,
+            },
+            update: {
+              petrol: prices.petrol ?? undefined,
+              diesel: prices.diesel ?? undefined,
+              lpg: prices.lpg ?? undefined,
+              live: true,
+              source: `${fetcher.brandId}-api`,
+            },
+          }),
+        );
+      }
+      await Promise.all(ops);
+      this.logger.log(`${fetcher.brandName}: ${map.size} il DB'ye yazıldı.`);
+    } catch (e: any) {
+      this.logger.error(`${fetcher.brandName} refresh hata: ${e.message}`);
     }
   }
 
-  getPrices(): FuelPrices {
-    return this.currentPrices;
+  private async loadCacheFromDb() {
+    const rows = await this.prisma.brandProvincePrice.findMany();
+    this.priceCache.clear();
+    for (const r of rows) {
+      this.priceCache.set(`${r.brandId}:${r.provinceCode}`, {
+        petrol: r.petrol,
+        diesel: r.diesel,
+        lpg: r.lpg,
+      });
+    }
+    this.logger.log(`Cache reloaded: ${rows.length} kayıt.`);
   }
 
+  // ─── Public API ────────────────────────────────────────────────────────────
+
+  /** Markanın il fiyatı. Yoksa: ülke ortalaması → o marka default → global default. */
+  getBrandPrice(brandId: string, provinceCode: number = DEFAULT_PROVINCE): FuelPrices {
+    const direct = this.priceCache.get(`${brandId}:${provinceCode}`);
+    if (direct) return this.fillNulls(direct, brandId);
+
+    // Fallback: o markanın ulusal ortalaması
+    const avg = this.brandAverage(brandId);
+    if (avg) return avg;
+
+    // Son çare: global default
+    return {
+      petrol: this.defaultPrice,
+      diesel: this.defaultPrice,
+      lpg: this.defaultLpg,
+    };
+  }
+
+  private brandAverage(brandId: string): FuelPrices | null {
+    const all: Array<[number, BrandPrices]> = [];
+    for (const [key, v] of this.priceCache.entries()) {
+      if (key.startsWith(`${brandId}:`)) all.push([Number(key.split(':')[1]), v]);
+    }
+    if (!all.length) return null;
+    const avg = (k: keyof BrandPrices) => {
+      const vals = all.map(([, p]) => p[k]).filter((n): n is number => n != null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    };
+    return this.fillNulls(
+      { petrol: avg('petrol'), diesel: avg('diesel'), lpg: avg('lpg') },
+      brandId,
+    );
+  }
+
+  private fillNulls(p: BrandPrices, _brandId: string): FuelPrices {
+    return {
+      petrol: p.petrol ?? this.defaultPrice,
+      diesel: p.diesel ?? this.defaultPrice,
+      lpg: p.lpg ?? this.defaultLpg,
+    };
+  }
+
+  /** Tüm markaların verilen il için snapshot'ı (carousel için). */
+  getAllBrandPrices(provinceCode: number = DEFAULT_PROVINCE): BrandPriceSnapshot[] {
+    return this.fetchers.map((f) => {
+      const has = this.priceCache.has(`${f.brandId}:${provinceCode}`);
+      const prices = this.getBrandPrice(f.brandId, provinceCode);
+      return {
+        brandId: f.brandId,
+        brandName: f.brandName,
+        prices,
+        live: has,
+        updatedAt: (this.lastRefreshAt ?? new Date()).toISOString(),
+      };
+    });
+  }
+
+  /** Backward compat: primary marka (Opet İstanbul) fiyatları. */
+  getPrices(): FuelPrices {
+    return this.getBrandPrice(this.PRIMARY_BRAND, DEFAULT_PROVINCE);
+  }
+
+  /** Backward compat: AI yakıt hesaplaması primary marka üzerinden. */
   getPriceForType(type: string): number {
+    const p = this.getPrices();
     const t = type.toLowerCase();
-    if (t.includes('diesel') || t.includes('dizel')) return this.currentPrices.diesel;
-    if (t.includes('lpg')) return this.currentPrices.lpg;
-    // Hybrid uses petrol
-    return this.currentPrices.petrol;
+    if (t.includes('diesel') || t.includes('dizel')) return p.diesel;
+    if (t.includes('lpg')) return p.lpg;
+    return p.petrol;
+  }
+
+  /** Utility: hangi iller için hangi marka canlı verisi var? */
+  hasLivePrice(brandId: string, provinceCode: number): boolean {
+    return this.priceCache.has(`${brandId}:${provinceCode}`);
   }
 }

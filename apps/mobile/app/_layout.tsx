@@ -44,9 +44,9 @@ function RootNavigator() {
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="route/[id]" />
-      <Stack.Screen name="vehicles/index" options={{ headerShown: true, title: 'Araçlarım' }} />
-      <Stack.Screen name="vehicles/add" options={{ headerShown: true, title: 'Araç Ekle' }} />
-      <Stack.Screen name="vehicles/[id]" options={{ headerShown: true, title: 'Aracı Düzenle' }} />
+      <Stack.Screen name="vehicles/index" options={{ headerShown: false, title: 'Araçlarım' }} />
+      <Stack.Screen name="vehicles/add" options={{ headerShown: false, title: 'Araç Ekle' }} />
+      <Stack.Screen name="vehicles/[id]" options={{ headerShown: false, title: 'Aracı Düzenle' }} />
     </Stack>
   );
 }

@@ -5,7 +5,8 @@ import { MapPin, Car, Clock, Fuel, ChevronLeft, Heart, Navigation, ChevronDown, 
 import MapView, { Marker, Polyline, Callout, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import { routeService } from '@/services/routeService';
 import { historyService } from '@/services/historyService';
-import type { Route, NearbyRestArea } from '@/types/api';
+import type { Route, NearbyRestArea, FuelSimulation } from '@/types/api';
+import { FuelSimulationBreakdown } from '@/components/FuelSimulationBreakdown';
 import { buildStrokeColors, decodePolyline, type RouteStep } from '@/utils/trafficColors';
 
 const { width } = Dimensions.get('window');
@@ -29,6 +30,7 @@ export default function ResultsScreen() {
   const [stopSuggestions, setStopSuggestions] = useState<any[]>([]);
   const [nearbyRestAreas, setNearbyRestAreas] = useState<NearbyRestArea[]>([]);
   const [alternatives, setAlternatives] = useState<any[]>([]);
+  const [fuelSimulation, setFuelSimulation] = useState<FuelSimulation | null>(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
 
   useEffect(() => {
@@ -113,6 +115,13 @@ export default function ResultsScreen() {
     if (params.alternatives) {
       try {
         setAlternatives(JSON.parse(params.alternatives as string));
+      } catch (e) { }
+    }
+
+    // Parse fuel simulation if passed via params
+    if (params.fuelSimulation && typeof params.fuelSimulation === 'string' && params.fuelSimulation.length > 0) {
+      try {
+        setFuelSimulation(JSON.parse(params.fuelSimulation as string));
       } catch (e) { }
     }
 
@@ -500,6 +509,9 @@ export default function ResultsScreen() {
             </View>
           )}
         </View>
+
+        {/* Fuel Simulation — sadece vehicleId varsa backend doldurur */}
+        {fuelSimulation && <FuelSimulationBreakdown sim={fuelSimulation} />}
 
         {/* Trip Details List */}
         <Text style={styles.sectionTitle}>Yolculuk Detayları</Text>

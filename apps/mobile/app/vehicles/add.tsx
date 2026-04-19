@@ -2,7 +2,7 @@
  * Add Vehicle Screen — "Precision Garage" Design
  * Dark automotive aesthetic · Gold accent · Numbered configurator steps
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,36 +16,19 @@ import {
   Platform,
 } from 'react-native';
 import { router } from 'expo-router';
-import { Search, X, CheckCircle2, ChevronRight, Car } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Search, X, CheckCircle2, ChevronRight, Car, ChevronLeft } from 'lucide-react-native';
 import { vehicleService } from '@/services/vehicleService';
 import type { Brand, VehicleModel, VehicleTrim, FuelType, Transmission } from '@/types/api';
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
-
-const C = {
-  bg:            '#090909',
-  surface:       '#111111',
-  card:          '#181818',
-  cardHover:     '#1E1E1E',
-  border:        '#252525',
-  borderMuted:   '#1A1A1A',
-  gold:          '#D4952A',
-  goldLight:     '#E8AE4C',
-  goldSubtle:    'rgba(212,149,42,0.12)',
-  text:          '#F0F0F0',
-  textSoft:      '#777777',
-  textFaint:     '#3A3A3A',
-  success:       '#30D158',
-  successSubtle: 'rgba(48,209,88,0.10)',
-  white:         '#FFFFFF',
-};
+import { C } from '@/theme';
 
 const FUEL_COLORS: Record<FuelType, { solid: string; subtle: string }> = {
-  PETROL:   { solid: '#FF9F0A', subtle: 'rgba(255,159,10,0.12)'  },
-  DIZEL:    { solid: '#0A84FF', subtle: 'rgba(10,132,255,0.12)'  },
-  HYBRID:   { solid: '#30D158', subtle: 'rgba(48,209,88,0.12)'   },
-  ELECTRIC: { solid: '#5AC8FA', subtle: 'rgba(90,200,250,0.12)'  },
-  LPG:      { solid: '#BF5AF2', subtle: 'rgba(191,90,242,0.12)'  },
+  PETROL:   { solid: C.fuel.PETROL,   subtle: `${C.fuel.PETROL}20`  },
+  DIZEL:    { solid: C.fuel.DIZEL,    subtle: `${C.fuel.DIZEL}20`   },
+  HYBRID:   { solid: C.fuel.HYBRID,   subtle: `${C.fuel.HYBRID}20`  },
+  ELECTRIC: { solid: C.fuel.ELECTRIC, subtle: `${C.fuel.ELECTRIC}20`},
+  LPG:      { solid: C.fuel.LPG,      subtle: `${C.fuel.LPG}20`     },
 };
 
 const FUEL_LABELS: Record<FuelType, string> = {
@@ -58,15 +41,10 @@ const TX_LABELS: Record<Transmission, string> = {
   CVT: 'CVT', SEMI_AUTOMATIC: 'Yarı Oto.',
 };
 
-const FUEL_TYPES: { value: FuelType }[] = [
-  { value: 'PETROL' }, { value: 'DIZEL' }, { value: 'HYBRID' },
-  { value: 'ELECTRIC' }, { value: 'LPG' },
-];
-
-const TX_TYPES: { value: Transmission }[] = [
-  { value: 'MANUAL' }, { value: 'AUTOMATIC' },
-  { value: 'CVT' }, { value: 'SEMI_AUTOMATIC' },
-];
+// All supported enum values — kullanılıyor sadece fallback olarak
+// (model seçilmeden önce ya da o modelde trim verisi yoksa manuel giriş için).
+const ALL_FUEL_TYPES: FuelType[]    = ['PETROL', 'DIZEL', 'HYBRID', 'ELECTRIC', 'LPG'];
+const ALL_TX_TYPES:   Transmission[] = ['MANUAL', 'AUTOMATIC', 'SEMI_AUTOMATIC', 'CVT'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -97,7 +75,7 @@ function StepHeader({
 const sh = StyleSheet.create({
   row:       { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   badge:     { width: 26, height: 26, borderRadius: 13, borderWidth: 1, borderColor: C.border, justifyContent: 'center', alignItems: 'center' },
-  badgeDone: { borderColor: C.success, backgroundColor: C.successSubtle },
+  badgeDone: { borderColor: C.success, backgroundColor: `${C.success}1A` },
   num:       { fontSize: 11, fontWeight: '700', color: C.textSoft },
   label:     { fontSize: 13, fontWeight: '700', color: C.textSoft, letterSpacing: 1.2, textTransform: 'uppercase' },
   labelDone: { color: C.success },
@@ -303,6 +281,7 @@ function Sep() { return <View style={{ height: 1, backgroundColor: C.borderMuted
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function AddVehicleScreen() {
+  const insets = useSafeAreaInsets();
   const [brands,         setBrands]        = useState<Brand[]>([]);
   const [models,         setModels]        = useState<VehicleModel[]>([]);
   const [trims,          setTrims]         = useState<VehicleTrim[]>([]);
@@ -322,6 +301,7 @@ export default function AddVehicleScreen() {
   const [enginePower,    setEnginePower]   = useState('');
   const [engineCap,      setEngineCap]     = useState('');
   const [weight,         setWeight]        = useState('');
+  const [preferredBrand, setPreferredBrand] = useState<string | null>(null);
 
   const [saving,         setSaving]        = useState(false);
   const [loadingBrands,  setLoadingBrands] = useState(true);
@@ -364,6 +344,37 @@ export default function AddVehicleScreen() {
     ? models.filter(m => m.name.toLowerCase().includes(modelQ.toLowerCase()))
     : models
   ).slice(0, 8);
+
+  // ── Dinamik yakıt & vites seçenekleri ──
+  // Trim verisi varsa o modelde gerçekten var olan yakıt/vites tiplerini göster.
+  // Yoksa (model seçilmedi veya scraped trim yok) tüm enum değerlerini fallback olarak listele.
+  const availFuels = useMemo<FuelType[]>(() => {
+    if (!trims.length) return ALL_FUEL_TYPES;
+    const s = new Set<FuelType>();
+    trims.forEach(t => t.fuelType && s.add(t.fuelType));
+    return ALL_FUEL_TYPES.filter(f => s.has(f));
+  }, [trims]);
+
+  const availTx = useMemo<Transmission[]>(() => {
+    if (!trims.length) return ALL_TX_TYPES;
+    const s = new Set<Transmission>();
+    trims.forEach(t => t.transmission && s.add(t.transmission));
+    const fromData = ALL_TX_TYPES.filter(t => s.has(t));
+    return fromData.length ? fromData : ALL_TX_TYPES;
+  }, [trims]);
+
+  // Seçili yakıt/vites, mevcut listede yoksa otomatik olarak ilk geçerliye fall-back et.
+  useEffect(() => {
+    if (availFuels.length && !availFuels.includes(fuelType)) {
+      setFuelType(availFuels[0]);
+    }
+  }, [availFuels]);
+
+  useEffect(() => {
+    if (availTx.length && !availTx.includes(transmission)) {
+      setTransmission(availTx[0]);
+    }
+  }, [availTx]);
 
   // ── Handlers ──
 
@@ -419,6 +430,7 @@ export default function AddVehicleScreen() {
         weight:         parseInt(weight)      || 1300,
         transmission,
         hasClimateControl: true,
+        preferredFuelBrand: preferredBrand || undefined,
       });
       router.back();
     } catch (err: any) {
@@ -441,6 +453,15 @@ export default function AddVehicleScreen() {
 
   return (
     <View style={s.root}>
+      {/* ── Header ────────────────────────────── */}
+      <View style={[s.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+          <ChevronLeft size={24} color={C.text} />
+        </TouchableOpacity>
+        <Text style={s.headerTitle}>Yeni Araç</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
       {/* ── sticky top summary bar ─────────────────────────────────── */}
       <View style={s.topBar}>
         <Car size={16} color={C.gold} strokeWidth={2} />
@@ -548,17 +569,27 @@ export default function AddVehicleScreen() {
         <View style={s.section}>
           <StepHeader num={selectedModel ? '05' : '04'} label="Yakıt & Vites" done={false} />
 
-          <Text style={s.groupLabel}>Yakıt Tipi</Text>
+          <Text style={s.groupLabel}>
+            Yakıt Tipi
+            {selectedModel && trims.length > 0 && (
+              <Text style={s.groupHint}>  · bu modelde mevcut</Text>
+            )}
+          </Text>
           <View style={s.chipWrap}>
-            {FUEL_TYPES.map(ft => (
-              <FuelChip key={ft.value} value={ft.value} active={fuelType === ft.value} onPress={() => setFuelType(ft.value)} />
+            {availFuels.map(f => (
+              <FuelChip key={f} value={f} active={fuelType === f} onPress={() => setFuelType(f)} />
             ))}
           </View>
 
-          <Text style={[s.groupLabel, { marginTop: 18 }]}>Vites Kutusu</Text>
+          <Text style={[s.groupLabel, { marginTop: 18 }]}>
+            Vites Kutusu
+            {selectedModel && trims.length > 0 && (
+              <Text style={s.groupHint}>  · bu modelde mevcut</Text>
+            )}
+          </Text>
           <View style={s.chipWrap}>
-            {TX_TYPES.map(tx => (
-              <TxChip key={tx.value} value={tx.value} active={transmission === tx.value} onPress={() => setTransmission(tx.value)} />
+            {availTx.map(t => (
+              <TxChip key={t} value={t} active={transmission === t} onPress={() => setTransmission(t)} />
             ))}
           </View>
         </View>
@@ -591,6 +622,40 @@ export default function AddVehicleScreen() {
           </View>
         </View>
 
+        <Sep />
+
+        {/* ── 07 TERCİH EDİLEN MARKA ──────────────────────────────── */}
+        <View style={s.section}>
+          <StepHeader num={selectedModel ? '07' : '06'} label="Yakıt Markası" done={!!preferredBrand} />
+          <Text style={s.fieldNote}>İkmal durakları bu markanın fiyatıyla hesaplanır — atlanabilir</Text>
+
+          <View style={[s.techRow, { marginTop: 10 }]}>
+            {[
+              { id: 'opet',  label: 'Opet',  color: '#004B9B' },
+              { id: 'shell', label: 'Shell', color: '#FBCE07' },
+              { id: 'po',    label: 'Petrol Ofisi', color: '#E30613' },
+              { id: 'bp',    label: 'BP',    color: '#007E33' },
+            ].map((b) => {
+              const active = preferredBrand === b.id;
+              return (
+                <TouchableOpacity
+                  key={b.id}
+                  onPress={() => setPreferredBrand(active ? null : b.id)}
+                  activeOpacity={0.8}
+                  style={[
+                    s.brandChip,
+                    active && { backgroundColor: b.color, borderColor: b.color },
+                  ]}
+                >
+                  <Text style={[s.brandChipTxt, active && { color: b.id === 'shell' ? '#1A1A1A' : '#FFF' }]}>
+                    {b.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
         {/* ── KAYDET ────────────────────────────────────────────────── */}
         <View style={s.footerWrap}>
           <TouchableOpacity
@@ -618,6 +683,20 @@ const s = StyleSheet.create({
   // Loading
   loadWrap:  { flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center', gap: 14 },
   loadTxt:   { fontSize: 14, color: C.textSoft },
+
+  // Header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: C.surface,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: C.text },
+  backBtn: { padding: 8 },
 
   // Summary bar
   topBar: {
@@ -654,10 +733,16 @@ const s = StyleSheet.create({
 
   // Chips
   groupLabel: { fontSize: 12, fontWeight: '700', color: C.textSoft, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 },
+  groupHint:  { fontSize: 10, fontWeight: '500', color: C.gold, letterSpacing: 0.3, textTransform: 'none' },
   chipWrap:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
   // Tech specs
-  techRow:   { flexDirection: 'row', gap: 8, marginTop: 16 },
+  techRow:   { flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' },
+  brandChip: {
+    paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.card,
+  },
+  brandChipTxt: { fontSize: 13, color: C.text, fontWeight: '700', letterSpacing: 0.2 },
   techGroup: { flex: 1 },
   techLabel: { fontSize: 11, color: C.textSoft, fontWeight: '600', marginBottom: 8, letterSpacing: 0.4 },
   techInput: {

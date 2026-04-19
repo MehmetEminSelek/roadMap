@@ -29,6 +29,7 @@ export interface Vehicle {
   weight: number;
   transmission: Transmission;
   hasClimateControl: boolean;
+  preferredFuelBrand?: string | null;
   createdAt: string;
 }
 
@@ -124,6 +125,31 @@ export interface CreateRouteRequest {
   vehicleId?: string;
   stopsCount?: number;
   hasClimateControl?: boolean;
+  /** Yola çıkarken depodaki yakıt yüzdesi (0-100). */
+  initialFuelPct?: number;
+  /** İkmal tetikleyici yüzde (default 10). */
+  reserveThresholdPct?: number;
+}
+
+export interface FuelStop {
+  atKm: number;
+  provinceCode: number;
+  provinceName: string;
+  brandId: string;
+  litersPurchased: number;
+  pricePerLiter: number;
+  cost: number;
+  tankBeforePct: number;
+  tankAfterPct: number;
+}
+
+export interface FuelSimulation {
+  stops: FuelStop[];
+  totalFuelCost: number;
+  totalLitersPurchased: number;
+  litersConsumedTotal: number;
+  endingFuelPct: number;
+  warnings: string[];
 }
 
 export interface RouteCalculationResult {
@@ -141,6 +167,7 @@ export interface RouteCalculationResult {
   stops?: StopSuggestion[];
   nearbyRestAreas?: NearbyRestArea[];
   alternatives?: any[];
+  fuelSimulation?: FuelSimulation;
 }
 
 export interface StopSuggestion {
@@ -171,6 +198,7 @@ export interface CreateVehicleRequest {
   weight: number;
   transmission: Transmission;
   hasClimateControl?: boolean;
+  preferredFuelBrand?: string;
 }
 
 export interface PaginatedResponse<T> {

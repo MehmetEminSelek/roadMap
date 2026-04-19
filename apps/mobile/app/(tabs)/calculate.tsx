@@ -23,6 +23,7 @@ import type { Vehicle } from '@/types/api';
 import { useAutocomplete } from '@/queries/autocomplete';
 import { SuggestionRow } from '@/components/SuggestionRow';
 import { useUserLocation } from '@/hooks/useUserLocation';
+import { FuelPctSlider } from '@/components/FuelPctSlider';
 
 const MAP_PROVIDER = PROVIDER_DEFAULT;
 
@@ -41,6 +42,7 @@ export default function CalculateScreen() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [vehiclePanelOpen, setVehiclePanelOpen] = useState(false);
+  const [initialFuelPct, setInitialFuelPct] = useState(80);
   const [calculating, setCalculating] = useState(false);
   const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
   const [debouncedInput, setDebouncedInput] = useState('');
@@ -141,6 +143,7 @@ export default function CalculateScreen() {
         origin: origin.trim(),
         destination: destination.trim(),
         vehicleId: selectedVehicle || undefined,
+        initialFuelPct: selectedVehicle ? initialFuelPct : undefined,
       });
       router.push({
         pathname: '/(tabs)/results',
@@ -158,6 +161,7 @@ export default function CalculateScreen() {
           stops: JSON.stringify(result.stops || []),
           nearbyRestAreas: JSON.stringify(result.nearbyRestAreas || []),
           alternatives: JSON.stringify(result.alternatives || []),
+          fuelSimulation: result.fuelSimulation ? JSON.stringify(result.fuelSimulation) : '',
         },
       });
     } catch (err: any) {
@@ -207,6 +211,23 @@ export default function CalculateScreen() {
               autoCorrect={false}
             />
           </XStack>
+
+          {/* Origin autocomplete — aktif alanın hemen altında açılır */}
+          {activeField === 'origin' && suggestions.length > 0 && (
+            <View style={styles.inlineSuggestions}>
+              <FlatList
+                data={suggestions}
+                keyExtractor={keyExtractor}
+                keyboardShouldPersistTaps="always"
+                style={{ maxHeight: 200 }}
+                renderItem={renderSuggestion}
+                initialNumToRender={6}
+                windowSize={5}
+                nestedScrollEnabled
+              />
+            </View>
+          )}
+
           <XStack alignItems="center" paddingLeft={27} paddingRight={12}>
             <View style={styles.routeLine} />
             <View style={{ flex: 1 }} />
@@ -227,22 +248,23 @@ export default function CalculateScreen() {
               autoCorrect={false}
             />
           </XStack>
-        </Card>
 
-        {/* Autocomplete suggestions */}
-        {suggestions.length > 0 && activeField && (
-          <View style={styles.suggestionsContainer}>
-            <FlatList
-              data={suggestions}
-              keyExtractor={keyExtractor}
-              keyboardShouldPersistTaps="always"
-              style={{ maxHeight: 200 }}
-              renderItem={renderSuggestion}
-              initialNumToRender={6}
-              windowSize={5}
-            />
-          </View>
-        )}
+          {/* Destination autocomplete — aktif alanın hemen altında açılır */}
+          {activeField === 'destination' && suggestions.length > 0 && (
+            <View style={styles.inlineSuggestions}>
+              <FlatList
+                data={suggestions}
+                keyExtractor={keyExtractor}
+                keyboardShouldPersistTaps="always"
+                style={{ maxHeight: 200 }}
+                renderItem={renderSuggestion}
+                initialNumToRender={6}
+                windowSize={5}
+                nestedScrollEnabled
+              />
+            </View>
+          )}
+        </Card>
       </KeyboardAvoidingView>
 
       {/* Bottom Panel */}
@@ -289,6 +311,12 @@ export default function CalculateScreen() {
           </XStack>
         </TouchableOpacity>
 
+        {selectedVehicleObj && (
+          <Card backgroundColor="white" borderRadius={16} padding={14} marginBottom={10} elevate>
+            <FuelPctSlider value={initialFuelPct} onChange={setInitialFuelPct} />
+          </Card>
+        )}
+
         <TouchableOpacity activeOpacity={canCalculate ? 0.85 : 1} onPress={handleCalculate} style={[styles.calcBtn, !canCalculate && styles.calcBtnDisabled]}>
           <Text fontSize={17} fontWeight="700" color="white" letterSpacing={-0.3}>Hesapla</Text>
           <ChevronRight size={22} color="rgba(255,255,255,0.7)" />
@@ -334,4 +362,14 @@ const styles = StyleSheet.create({
   spinRing: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: 'rgba(10,132,255,0.15)', borderTopColor: '#0A84FF' },
   loadingTitle: { fontSize: 24, fontWeight: '800', color: '#1C1C1E', letterSpacing: -0.5, marginTop: 28 },
   suggestionsContainer: { backgroundColor: 'white', borderRadius: 16, marginHorizontal: 16, marginTop: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12, elevation: 8, zIndex: 20 },
+  inlineSuggestions: {
+    marginHorizontal: 12,
+    marginTop: 2,
+    marginBottom: 6,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    overflow: 'hidden',
+  },
 });

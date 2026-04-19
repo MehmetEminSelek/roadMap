@@ -5,6 +5,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
+if (__DEV__) {
+  // Dev'de hangi backend'e bağlanıldığını hızlı doğrulamak için.
+  // Prod bundle'da bu blok minify sırasında drop edilir.
+  console.log(`[apiClient] baseURL → ${API_URL}`);
+}
+
 export const STORAGE_KEYS = {
   AUTH_TOKEN: 'roadmap_auth_token',
   USER_DATA: 'roadmap_user_data',

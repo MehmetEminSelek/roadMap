@@ -4,12 +4,15 @@ import { CreateRouteDto } from './dto/create-route.dto';
 import { RouteQueryDto } from './dto/route-query.dto';
 import { GoogleMapsService } from './google-maps.service';
 import { FuelAiService } from '../fuel-ai/fuel-ai.service';
+import { FuelSimulationService } from '../fuel-ai/fuel-simulation.service';
 import { TollsService } from '../tolls/tolls.service';
 import { PlacesService } from '../places/places.service';
 import { RouteStatus } from '@prisma/client';
 import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
 import { normalizeTr } from '../../common/text/normalize-tr';
 import { buildCityCacheKey } from '../../common/text/extract-city';
+import { extractProvincesFromCoords } from '../../common/geo/route-provinces';
+import { decodeSteps as decodeStepsUtil } from '../../common/geo/polyline-decode';
 
 @Injectable()
 export class RoutesService {
@@ -17,6 +20,7 @@ export class RoutesService {
     private prisma: PrismaService,
     private googleMaps: GoogleMapsService,
     private fuelAi: FuelAiService,
+    private fuelSim: FuelSimulationService,
     private tolls: TollsService,
     private places: PlacesService,
     @Inject(CACHE_MANAGER) private cache: Cache,
@@ -117,6 +121,27 @@ export class RoutesService {
       vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
     });
 
+    // Yakıt ikmali simülasyonu — sadece vehicleId varsa.
+    const fuelSimPromise: Promise<any> = vehicle
+      ? (async () => {
+          try {
+            const coords = this.decodeStepsToCoords(leg.steps);
+            const routeProvinces = extractProvincesFromCoords(coords);
+            return await this.fuelSim.simulate({
+              vehicleId: vehicle.id,
+              initialFuelPct: createRouteDto.initialFuelPct ?? 80,
+              reserveThresholdPct: createRouteDto.reserveThresholdPct ?? 10,
+              routeProvinces,
+              totalDistanceKm: distanceKm,
+              fallbackL100: epaFuelEconomyL100,
+            });
+          } catch (e) {
+            console.error('[RoutesService] Fuel simulation failed:', e);
+            return null;
+          }
+        })()
+      : Promise.resolve(null);
+
     // Her alternatif rota kendi içinde toll+fuel'ı paralel hesaplar
     const altTasks = allRoutes.slice(1).map(async (alt, idx) => {
       const i = idx + 1;
@@ -170,9 +195,10 @@ export class RoutesService {
     });
 
     // ── TEK BİR AWAIT: her şey aynı anda çalışır ──
-    const [tollData, fuelResult, altsSettled, stops, nearbyRestAreas] = await Promise.all([
+    const [tollData, fuelResult, fuelSimulation, altsSettled, stops, nearbyRestAreas] = await Promise.all([
       primaryTollPromise,
       primaryFuelPromise,
+      fuelSimPromise,
       Promise.all(altTasks),
       stopsPromise,
       restAreasPromise,
@@ -229,9 +255,11 @@ export class RoutesService {
       duration: leg.duration.text,
       distance: leg.distance.text,
       alternatives,
+      fuelSimulation: fuelSimulation || undefined,
     };
 
     // Tam sonuç cache — arka planda yaz (6 saat TTL)
+    // NOT: fuelSimulation cache'lenmez; initialFuelPct kullanıcıya özel.
     this.cache.set(exactCacheKey, {
       tollData,
       fuelResult,
@@ -294,6 +322,30 @@ export class RoutesService {
       include: { vehicle: true },
     });
 
+    // Cache hit path — yakıt simülasyonunu taze hesapla (initialFuelPct değişebilir).
+    let cachedFuelSim: any = null;
+    if (vehicleId) {
+      try {
+        const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
+        if (vehicle) {
+          const coords = this.decodeStepsToCoords(leg.steps);
+          const routeProvinces = extractProvincesFromCoords(coords);
+          cachedFuelSim = await this.fuelSim.simulate({
+            vehicleId: vehicle.id,
+            initialFuelPct: createRouteDto.initialFuelPct ?? 80,
+            reserveThresholdPct: createRouteDto.reserveThresholdPct ?? 10,
+            routeProvinces,
+            totalDistanceKm: leg.distance.value / 1000,
+            fallbackL100: fuelResult?.estimatedConsumption
+              ? (fuelResult.estimatedConsumption * 100) / (leg.distance.value / 1000)
+              : undefined,
+          });
+        }
+      } catch (e) {
+        console.error('[RoutesService] Cached fuel simulation failed:', e);
+      }
+    }
+
     return {
       route: savedRoute,
       tollCost: tollData.totalCost,
@@ -306,26 +358,13 @@ export class RoutesService {
       duration,
       distance,
       alternatives: alternatives || [],
+      fuelSimulation: cachedFuelSim || undefined,
     };
   }
 
   /** Decode Google encoded polylines from each step and flatten into coord list. */
   private decodeStepsToCoords(steps: any[]): { lat: number; lng: number }[] {
-    return (steps || []).flatMap((step) => {
-      const encoded = step?.polyline?.points || '';
-      const coords: { lat: number; lng: number }[] = [];
-      let index = 0, lat = 0, lng = 0;
-      while (index < encoded.length) {
-        let b: number, shift = 0, result = 0;
-        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-        lat += (result & 1) ? ~(result >> 1) : (result >> 1);
-        shift = 0; result = 0;
-        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-        lng += (result & 1) ? ~(result >> 1) : (result >> 1);
-        coords.push({ lat: lat / 1e5, lng: lng / 1e5 });
-      }
-      return coords;
-    });
+    return decodeStepsUtil(steps);
   }
 
   async findAll(userId: string, query: RouteQueryDto): Promise<any> {

@@ -11,6 +11,7 @@ class VehicleEntity implements Omit<Vehicle, 'userId'> {
   weight: number;
   transmission: Transmission;
   hasClimateControl: boolean;
+  preferredFuelBrand: string | null;
   createdAt: Date;
 }
 
