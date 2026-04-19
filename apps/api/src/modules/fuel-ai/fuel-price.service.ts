@@ -149,20 +149,63 @@ export class FuelPriceService implements OnModuleInit {
 
   // ─── Public API ────────────────────────────────────────────────────────────
 
-  /** Markanın il fiyatı. Yoksa: ülke ortalaması → o marka default → global default. */
+  /**
+   * Markanın il fiyatı. Fallback zinciri:
+   *   1. Bu markanın bu ili için direkt kayıt
+   *   2. Bu markanın ulusal ortalaması (diğer illerin ortalaması)
+   *   3. Tüm markaların bu il için ortalaması (cross-brand)
+   *   4. Tüm markaların ulusal ortalaması (cross-brand global)
+   *   5. Env default (FUEL_PRICE_TL)
+   *
+   * 3-4: OPET down olduğunda OPET kartı 65/65 fallback yerine PO/BP'nin gerçek
+   * fiyatlarına yakın değer gösterir.
+   */
   getBrandPrice(brandId: string, provinceCode: number = DEFAULT_PROVINCE): FuelPrices {
     const direct = this.priceCache.get(`${brandId}:${provinceCode}`);
     if (direct) return this.fillNulls(direct, brandId);
 
-    // Fallback: o markanın ulusal ortalaması
-    const avg = this.brandAverage(brandId);
-    if (avg) return avg;
+    const brandAvg = this.brandAverage(brandId);
+    if (brandAvg) return brandAvg;
 
-    // Son çare: global default
+    const provinceAvg = this.crossBrandProvinceAverage(provinceCode);
+    if (provinceAvg) return provinceAvg;
+
+    const globalAvg = this.crossBrandGlobalAverage();
+    if (globalAvg) return globalAvg;
+
     return {
       petrol: this.defaultPrice,
       diesel: this.defaultPrice,
       lpg: this.defaultLpg,
+    };
+  }
+
+  private crossBrandProvinceAverage(provinceCode: number): FuelPrices | null {
+    const bucket: BrandPrices[] = [];
+    for (const [key, v] of this.priceCache.entries()) {
+      if (key.endsWith(`:${provinceCode}`)) bucket.push(v);
+    }
+    return this.averageBucket(bucket);
+  }
+
+  private crossBrandGlobalAverage(): FuelPrices | null {
+    return this.averageBucket(Array.from(this.priceCache.values()));
+  }
+
+  private averageBucket(bucket: BrandPrices[]): FuelPrices | null {
+    if (!bucket.length) return null;
+    const avg = (k: keyof BrandPrices) => {
+      const vals = bucket.map((p) => p[k]).filter((n): n is number => n != null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    };
+    const petrol = avg('petrol');
+    const diesel = avg('diesel');
+    const lpg = avg('lpg');
+    if (petrol == null && diesel == null && lpg == null) return null;
+    return {
+      petrol: petrol ?? this.defaultPrice,
+      diesel: diesel ?? this.defaultPrice,
+      lpg: lpg ?? this.defaultLpg,
     };
   }
 
