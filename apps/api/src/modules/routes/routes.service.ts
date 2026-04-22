@@ -120,6 +120,11 @@ export class RoutesService {
       acOn: createRouteDto.hasClimateControl,
       cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
       engineDisplacementL: createRouteDto.engineDisplacementL,
+      ambientTempC: createRouteDto.ambientTempC,
+      extraLoadKg: createRouteDto.extraLoadKg,
+      headwindKph: createRouteDto.headwindKph,
+      rainLevel: createRouteDto.rainLevel,
+      elevationGainM: createRouteDto.elevationGainM,
       averageConsumption: epaFuelEconomyL100 ? (distanceKm * epaFuelEconomyL100) / 100 : undefined,
       vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
     });
@@ -141,6 +146,11 @@ export class RoutesService {
               cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
               acOn: createRouteDto.hasClimateControl,
               engineDisplacementL: createRouteDto.engineDisplacementL,
+              ambientTempC: createRouteDto.ambientTempC,
+              extraLoadKg: createRouteDto.extraLoadKg,
+              headwindKph: createRouteDto.headwindKph,
+              rainLevel: createRouteDto.rainLevel,
+              elevationGainM: createRouteDto.elevationGainM,
             });
           } catch (e) {
             console.error('[RoutesService] Fuel simulation failed:', e);
@@ -166,6 +176,11 @@ export class RoutesService {
             acOn: createRouteDto.hasClimateControl,
             cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
             engineDisplacementL: createRouteDto.engineDisplacementL,
+            ambientTempC: createRouteDto.ambientTempC,
+            extraLoadKg: createRouteDto.extraLoadKg,
+            headwindKph: createRouteDto.headwindKph,
+            rainLevel: createRouteDto.rainLevel,
+            elevationGainM: createRouteDto.elevationGainM,
             averageConsumption: epaFuelEconomyL100 ? (altDistanceKm * epaFuelEconomyL100) / 100 : undefined,
             vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
           }),

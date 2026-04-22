@@ -36,13 +36,25 @@ export interface SimulateInput {
   /** AI tahminlerinde EPA eksikse fallback L/100km */
   fallbackL100?: number;
 
-  // ── Yeni tüketim faktörleri (FuelCalculatorService üzerinden uygulanır) ──
+  // ── Tüketim faktörleri (FuelCalculatorService üzerinden uygulanır) ──
   /** Otoyol seyir hızı km/h. Default 110. */
   cruisingSpeedKph?: number;
   /** Klima açık mı? Default true. */
   acOn?: boolean;
-  /** Motor hacmi litre. Default 1.6. AC faktörünü ölçekler. */
+  /** Motor hacmi litre. Default 1.6. Motor gücü proxy'si. */
   engineDisplacementL?: number;
+  /** Dış ortam sıcaklığı °C. Default 20. AC yükü + hava yoğunluğu için. */
+  ambientTempC?: number;
+  /** Ek yük (yolcu + bagaj) kg. Default 0. */
+  extraLoadKg?: number;
+  /** Araç curb weight kg. Default 1500. */
+  vehicleMassKg?: number;
+  /** Baş rüzgâr km/s (+head, -tail). Default 0. */
+  headwindKph?: number;
+  /** Yağmur şiddeti 0-3. Default 0. */
+  rainLevel?: 0 | 1 | 2 | 3;
+  /** Rotanın net tırmanışı m. Default 0. */
+  elevationGainM?: number;
 }
 
 const DEFAULT_TANK_BY_FUEL: Record<string, number> = {
@@ -94,14 +106,23 @@ export class FuelSimulationService {
       warnings.push(`Ortalama tüketim verisi yok, ${l100Base} L/100km varsayıldı.`);
     }
 
-    // Hız + klima faktörleri. Trafik faktörü simülasyonda kullanılmaz (province
-    // segmentlerine bakıyoruz, ortalama hız hesabı anlamlı değil).
+    // Tüm çevresel faktörler. Trafik faktörü simülasyonda anlam taşımaz
+    // (province segmentlerine bakıyoruz, ortalama hız hesabı anlamlı değil);
+    // distanceKm/durationSeconds vermeyerek trafficFactor'u 1.0'da bırakıyoruz.
     const factors = this.fuelCalc.combinedFactor({
       speedKph: input.cruisingSpeedKph ?? 110,
       acOn: input.acOn ?? true,
       engineDisplacementL: input.engineDisplacementL ?? 1.6,
+      ambientTempC: input.ambientTempC,
+      extraLoadKg: input.extraLoadKg,
+      vehicleMassKg: input.vehicleMassKg,
+      headwindKph: input.headwindKph,
+      rainLevel: input.rainLevel,
+      elevationGainM: input.elevationGainM,
+      distanceKm: input.totalDistanceKm,
+      baseL100: l100Base,
     });
-    const l100 = l100Base * factors.speedFactor * factors.acFactor;
+    const l100 = l100Base * factors.combined;
 
     // Marka tercihi
     const preferredBrand =
