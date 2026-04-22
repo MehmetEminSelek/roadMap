@@ -212,24 +212,33 @@ export class GoogleMapsService {
             };
           });
 
-          // Alternatif kalite filtresi: ana rotaya göre
-          // mesafe >%50 fazla veya süre >%60 fazla olan alakasız rotaları ele
+          // Alternatif kalite filtresi: ana rotaya göre fazla uzak/yavaş olanları ele.
+          // Tüm legs toplamı kullanılır (çok-leg desteği); uzun rotalarda Google
+          // bazen bir tık uzun ama geçerli alternatifler döndürüyor → eşik 2.0x.
           if (results.length > 1) {
-            const primaryDist = results[0].legacy.routes[0]?.legs[0]?.distance?.value || 0;
-            const primaryDur = results[0].legacy.routes[0]?.legs[0]?.duration?.value || 0;
+            const sumLegs = (r: (typeof results)[0]) =>
+              (r.legacy.routes[0]?.legs ?? []).reduce(
+                (acc, leg) => ({
+                  dist: acc.dist + (leg.distance?.value ?? 0),
+                  dur: acc.dur + (leg.duration?.value ?? 0),
+                }),
+                { dist: 0, dur: 0 },
+              );
+
+            const primary = sumLegs(results[0]);
 
             const filtered = [results[0]];
             for (let i = 1; i < results.length; i++) {
-              const altDist = results[i].legacy.routes[0]?.legs[0]?.distance?.value || 0;
-              const altDur = results[i].legacy.routes[0]?.legs[0]?.duration?.value || 0;
+              const alt = sumLegs(results[i]);
+              const distRatio = primary.dist > 0 ? alt.dist / primary.dist : 1;
+              const durRatio = primary.dur > 0 ? alt.dur / primary.dur : 1;
 
-              const distRatio = primaryDist > 0 ? altDist / primaryDist : 1;
-              const durRatio = primaryDur > 0 ? altDur / primaryDur : 1;
-
-              if (distRatio <= 1.5 && durRatio <= 1.6) {
+              if (distRatio <= 2.0 && durRatio <= 2.0) {
                 filtered.push(results[i]);
               } else {
-                console.log(`[GoogleMaps] Alternatif ${i} elendi — mesafe: ${(distRatio * 100).toFixed(0)}%, süre: ${(durRatio * 100).toFixed(0)}%`);
+                console.log(
+                  `[GoogleMaps] Alternatif ${i} elendi — mesafe: ${(distRatio * 100).toFixed(0)}%, süre: ${(durRatio * 100).toFixed(0)}%`,
+                );
               }
             }
             return filtered;

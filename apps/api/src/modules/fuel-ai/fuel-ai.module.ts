@@ -5,11 +5,12 @@ import { FuelAiController } from './fuel-ai.controller';
 import { FuelAiService } from './fuel-ai.service';
 import { FuelPriceService } from './fuel-price.service';
 import { FuelSimulationService } from './fuel-simulation.service';
+import { FuelCalculatorService } from './fuel-calculator.service';
 import { FuelPricesController } from './fuel-prices.controller';
 import { OpetFetcher } from './brand-fetchers/opet.fetcher';
 import { ShellFetcher } from './brand-fetchers/shell.fetcher';
 import { PetrolOfisiFetcher } from './brand-fetchers/po.fetcher';
-import { BpFetcher } from './brand-fetchers/bp.fetcher';
+import { TotalFetcher } from './brand-fetchers/total.fetcher';
 
 @Module({
   imports: [PrismaModule, HttpModule],
@@ -18,11 +19,12 @@ import { BpFetcher } from './brand-fetchers/bp.fetcher';
     FuelAiService,
     FuelPriceService,
     FuelSimulationService,
+    FuelCalculatorService,
     OpetFetcher,
     ShellFetcher,
     PetrolOfisiFetcher,
-    BpFetcher,
+    TotalFetcher,
   ],
-  exports: [FuelAiService, FuelPriceService, FuelSimulationService],
+  exports: [FuelAiService, FuelPriceService, FuelSimulationService, FuelCalculatorService],
 })
 export class FuelAiModule {}

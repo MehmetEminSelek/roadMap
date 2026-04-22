@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FuelPriceService, FuelPrices } from './fuel-price.service';
+import { FuelCalculatorService } from './fuel-calculator.service';
 import { getProvinceName } from '../../common/geo/province-lookup';
 import { ProvinceSegment } from '../../common/geo/route-provinces';
 
@@ -31,9 +32,17 @@ export interface SimulateInput {
   initialFuelPct: number;        // 0-100
   routeProvinces: ProvinceSegment[];
   totalDistanceKm: number;
-  reserveThresholdPct?: number;  // default 10
+  reserveThresholdPct?: number;  // default 20 — ikmal %20'de tetiklenir, dolum %100'e çıkar (stop başı ~%80 tank)
   /** AI tahminlerinde EPA eksikse fallback L/100km */
   fallbackL100?: number;
+
+  // ── Yeni tüketim faktörleri (FuelCalculatorService üzerinden uygulanır) ──
+  /** Otoyol seyir hızı km/h. Default 110. */
+  cruisingSpeedKph?: number;
+  /** Klima açık mı? Default true. */
+  acOn?: boolean;
+  /** Motor hacmi litre. Default 1.6. AC faktörünü ölçekler. */
+  engineDisplacementL?: number;
 }
 
 const DEFAULT_TANK_BY_FUEL: Record<string, number> = {
@@ -47,6 +56,7 @@ export class FuelSimulationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fuelPrice: FuelPriceService,
+    private readonly fuelCalc: FuelCalculatorService,
   ) {}
 
   async simulate(input: SimulateInput): Promise<FuelSimulationResult> {
@@ -79,10 +89,19 @@ export class FuelSimulationService {
       warnings.push(`Tank kapasitesi bilinmiyor, ${tankCapacity}L varsayıldı.`);
     }
 
-    const l100 = trim?.fuelEconomyL100 ?? input.fallbackL100 ?? 7.5;
+    const l100Base = trim?.fuelEconomyL100 ?? input.fallbackL100 ?? 7.5;
     if (!trim?.fuelEconomyL100 && !input.fallbackL100) {
-      warnings.push(`Ortalama tüketim verisi yok, ${l100} L/100km varsayıldı.`);
+      warnings.push(`Ortalama tüketim verisi yok, ${l100Base} L/100km varsayıldı.`);
     }
+
+    // Hız + klima faktörleri. Trafik faktörü simülasyonda kullanılmaz (province
+    // segmentlerine bakıyoruz, ortalama hız hesabı anlamlı değil).
+    const factors = this.fuelCalc.combinedFactor({
+      speedKph: input.cruisingSpeedKph ?? 110,
+      acOn: input.acOn ?? true,
+      engineDisplacementL: input.engineDisplacementL ?? 1.6,
+    });
+    const l100 = l100Base * factors.speedFactor * factors.acFactor;
 
     // Marka tercihi
     const preferredBrand =
@@ -91,7 +110,7 @@ export class FuelSimulationService {
     // Yakıt tipini FuelPrices key'ine eşle
     const fuelKey = this.mapFuelKey(vehicle.fuelType);
 
-    const reserveThresholdPct = input.reserveThresholdPct ?? 10;
+    const reserveThresholdPct = input.reserveThresholdPct ?? 20;
     const reserveLiters = (tankCapacity * reserveThresholdPct) / 100;
     let currentLiters = (tankCapacity * input.initialFuelPct) / 100;
 

@@ -117,6 +117,9 @@ export class RoutesService {
       distanceKm,
       durationSeconds: leg.duration.value,
       hasClimateControl: createRouteDto.hasClimateControl,
+      acOn: createRouteDto.hasClimateControl,
+      cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
+      engineDisplacementL: createRouteDto.engineDisplacementL,
       averageConsumption: epaFuelEconomyL100 ? (distanceKm * epaFuelEconomyL100) / 100 : undefined,
       vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
     });
@@ -130,10 +133,14 @@ export class RoutesService {
             return await this.fuelSim.simulate({
               vehicleId: vehicle.id,
               initialFuelPct: createRouteDto.initialFuelPct ?? 80,
-              reserveThresholdPct: createRouteDto.reserveThresholdPct ?? 10,
+              // reserveThresholdPct: verilmediğinde simülasyon default'u (%20) kullanır.
+              reserveThresholdPct: createRouteDto.reserveThresholdPct,
               routeProvinces,
               totalDistanceKm: distanceKm,
               fallbackL100: epaFuelEconomyL100,
+              cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
+              acOn: createRouteDto.hasClimateControl,
+              engineDisplacementL: createRouteDto.engineDisplacementL,
             });
           } catch (e) {
             console.error('[RoutesService] Fuel simulation failed:', e);
@@ -156,6 +163,9 @@ export class RoutesService {
             distanceKm: altDistanceKm,
             durationSeconds: altLeg.duration.value,
             hasClimateControl: createRouteDto.hasClimateControl,
+            acOn: createRouteDto.hasClimateControl,
+            cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
+            engineDisplacementL: createRouteDto.engineDisplacementL,
             averageConsumption: epaFuelEconomyL100 ? (altDistanceKm * epaFuelEconomyL100) / 100 : undefined,
             vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
           }),

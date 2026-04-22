@@ -4,7 +4,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { FuelCalculateDto } from './dto/fuel-calculate.dto';
 import { FuelPriceService } from './fuel-price.service';
-import { Vehicle } from '@prisma/client';
+import { FuelCalculatorService } from './fuel-calculator.service';
 import { AxiosResponse } from 'axios';
 
 interface FuelCalculationResult {
@@ -14,8 +14,10 @@ interface FuelCalculationResult {
   confidence: number;
   breakdown: {
     baseConsumption: number;
-    climateControlFactor: number;
+    speedFactor: number;
+    acFactor: number;
     trafficFactor: number;
+    climateControlFactor: number; // = acFactor, backward-compat alias
     weightFactor: number;
   };
 }
@@ -44,6 +46,7 @@ export class FuelAiService {
     private configService: ConfigService,
     private httpService: HttpService,
     private fuelPriceService: FuelPriceService,
+    private fuelCalc: FuelCalculatorService,
   ) {
     this.apiKey = this.configService.get<string>('googleGemini.apiKey') || '';
     this.apiUrl = this.configService.get<string>('googleGemini.apiUrl', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
@@ -58,16 +61,20 @@ export class FuelAiService {
 
     // Default consumption values based on fuel type (L/100km)
     const defaultConsumption = this.getDefaultConsumption(dto.vehicleType);
+    const rawBase = (distanceKm * defaultConsumption) / 100;
 
-    // Calculate base consumption in total liters
-    let baseConsumption = (distanceKm * defaultConsumption) / 100;
+    // Tüm tüketim faktörleri (hız, klima, trafik) FuelCalculatorService'ten.
+    const factors = this.fuelCalc.combinedFactor({
+      speedKph: dto.cruisingSpeedKph,
+      acOn: dto.acOn,
+      engineDisplacementL: dto.engineDisplacementL,
+      hasClimateControl,
+      durationSeconds,
+      distanceKm,
+    });
 
-    // Apply factors
-    const trafficFactor = this.calculateTrafficFactor(durationSeconds, distanceKm);
-    const climateFactor = hasClimateControl ? 1.1 : 1.0;
     const weightFactor = dto.averageConsumption ? 1.0 : 1.05;
-
-    baseConsumption *= climateFactor * weightFactor;
+    let baseConsumption = rawBase * factors.combined * weightFactor;
 
     // Use AI for refinement if no direct consumption provided
     let finalConsumption = dto.averageConsumption || baseConsumption;
@@ -99,9 +106,11 @@ export class FuelAiService {
       fuelPrice: currentFuelPrice,
       confidence,
       breakdown: {
-        baseConsumption,
-        climateControlFactor: climateFactor,
-        trafficFactor,
+        baseConsumption: rawBase,
+        speedFactor: factors.speedFactor,
+        acFactor: factors.acFactor,
+        trafficFactor: factors.trafficFactor,
+        climateControlFactor: factors.climateFactor,
         weightFactor,
       },
     };
@@ -133,18 +142,6 @@ export class FuelAiService {
     }
 
     return defaults.medium; // Default to medium
-  }
-
-  private calculateTrafficFactor(durationSeconds: number | undefined, distanceKm: number): number {
-    if (!durationSeconds || durationSeconds <= 0) return 1.0;
-
-    const averageSpeedKmh = (distanceKm / (durationSeconds / 3600));
-
-    // Traffic factor based on average speed
-    if (averageSpeedKmh > 100) return 0.9; // Highway - more efficient
-    if (averageSpeedKmh > 70) return 1.0; // Normal
-    if (averageSpeedKmh > 40) return 1.15; // City traffic
-    return 1.3; // Heavy traffic
   }
 
   private async getAiFuelEstimate(

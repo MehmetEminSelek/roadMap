@@ -23,7 +23,7 @@ import type { Vehicle } from '@/types/api';
 import { useAutocomplete } from '@/queries/autocomplete';
 import { SuggestionRow } from '@/components/SuggestionRow';
 import { useUserLocation } from '@/hooks/useUserLocation';
-import { FuelPctSlider } from '@/components/FuelPctSlider';
+import { ExtraParamsSheet, ExtraParams } from '@/components/ExtraParamsSheet';
 
 const MAP_PROVIDER = PROVIDER_DEFAULT;
 
@@ -46,7 +46,12 @@ export default function CalculateScreen() {
   const [calculating, setCalculating] = useState(false);
   const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
   const [debouncedInput, setDebouncedInput] = useState('');
+  const [sheetVisible, setSheetVisible] = useState(false);
   const inputRef = useRef<string>('');
+  // Background prefetch: "Hesapla" butonuna basıldığında hemen rota isteği
+  // fırlatılıyor; sheet'te ayar yapılırken response geliyor, onay'da anında
+  // navigate.
+  const prefetchPromiseRef = useRef<Promise<any> | null>(null);
 
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -135,24 +140,54 @@ export default function CalculateScreen() {
 
   const keyExtractor = useCallback((item: { placeId: string }) => item.placeId, []);
 
-  const handleCalculate = async () => {
+  /**
+   * "Hesapla" → sheet'i aç ve aynı anda arka planda route API call'u başlat.
+   * Kullanıcı hız/klima ayarlarken response hazırlanıyor; sheet confirm'de
+   * client-side hız+klima çarpanı uygulanıp results'a navigate ediliyor.
+   */
+  const handleCalculate = () => {
     if (!canCalculate) return;
-    setCalculating(true);
-    try {
-      const result = await routeService.calculate({
+    prefetchPromiseRef.current = routeService
+      .calculate({
         origin: origin.trim(),
         destination: destination.trim(),
         vehicleId: selectedVehicle || undefined,
         initialFuelPct: selectedVehicle ? initialFuelPct : undefined,
+        cruisingSpeedKph: 110,
+        hasClimateControl: true,
+      })
+      .catch((err) => {
+        // Hata'yı ref'e gömmek yerine re-throw → handleSheetConfirm yakalar
+        throw err;
       });
+    setSheetVisible(true);
+  };
+
+  const handleSheetConfirm = async ({ speedKph, acOn, initialFuelPct: sheetFuelPct }: ExtraParams) => {
+    setCalculating(true);
+    try {
+      const result = await prefetchPromiseRef.current;
+      if (!result) throw new Error('Rota hesaplanamadı.');
+
+      // Client-side hız + klima düzeltmesi
+      const speedF = (kph: number) => Math.max(0.80, Math.min(1.60, Math.pow(kph / 90, 1.8)));
+      const acF = (on: boolean) => (on ? 1.06 : 1.0);
+      const defaultMul = speedF(110) * acF(true);
+      const userMul = speedF(speedKph) * acF(acOn);
+      const fuelAdjust = userMul / defaultMul;
+
+      const adjustedFuelCost = result.fuelCost * fuelAdjust;
+      const adjustedTotalCost = (result.totalCost - result.fuelCost) + adjustedFuelCost;
+
+      setSheetVisible(false);
       router.push({
         pathname: '/(tabs)/results',
         params: {
           routeId: result.route.id,
           tollCost: String(result.tollCost),
           tollDetails: JSON.stringify(result.tollDetails || []),
-          fuelCost: String(result.fuelCost),
-          totalCost: String(result.totalCost),
+          fuelCost: String(adjustedFuelCost),
+          totalCost: String(adjustedTotalCost),
           origin: result.route.origin,
           destination: result.route.destination,
           distance: String(result.route.distance),
@@ -162,9 +197,13 @@ export default function CalculateScreen() {
           nearbyRestAreas: JSON.stringify(result.nearbyRestAreas || []),
           alternatives: JSON.stringify(result.alternatives || []),
           fuelSimulation: result.fuelSimulation ? JSON.stringify(result.fuelSimulation) : '',
+          speedKph: String(speedKph),
+          acOn: String(acOn),
+          sheetFuelPct: String(sheetFuelPct),
         },
       });
     } catch (err: any) {
+      setSheetVisible(false);
       Alert.alert('Hata', err.message || 'Rota hesaplanamadı.');
     } finally {
       setCalculating(false);
@@ -311,17 +350,25 @@ export default function CalculateScreen() {
           </XStack>
         </TouchableOpacity>
 
-        {selectedVehicleObj && (
-          <Card backgroundColor="white" borderRadius={16} padding={14} marginBottom={10} elevate>
-            <FuelPctSlider value={initialFuelPct} onChange={setInitialFuelPct} />
-          </Card>
-        )}
-
         <TouchableOpacity activeOpacity={canCalculate ? 0.85 : 1} onPress={handleCalculate} style={[styles.calcBtn, !canCalculate && styles.calcBtnDisabled]}>
           <Text fontSize={17} fontWeight="700" color="white" letterSpacing={-0.3}>Hesapla</Text>
           <ChevronRight size={22} color="rgba(255,255,255,0.7)" />
         </TouchableOpacity>
       </View>
+
+      {/* Extra Params Sheet — speed/AC/fuel, opens on Hesapla tap.
+          Route API çağrısı sheet açılırken arka planda zaten başlamış oluyor. */}
+      <ExtraParamsSheet
+        visible={sheetVisible}
+        hasVehicle={!!selectedVehicleObj}
+        defaultFuelPct={initialFuelPct}
+        loading={calculating}
+        onConfirm={handleSheetConfirm}
+        onCancel={() => {
+          setSheetVisible(false);
+          prefetchPromiseRef.current = null;
+        }}
+      />
 
       {/* Loading Overlay */}
       {calculating && (

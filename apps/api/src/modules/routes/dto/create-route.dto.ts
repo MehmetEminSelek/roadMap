@@ -43,12 +43,26 @@ class CreateRouteDto {
   @IsOptional()
   initialFuelPct?: number;
 
-  /** Depoda kalan yüzdede ikmal tetiklensin (default %10). */
+  /** Depoda kalan yüzdede ikmal tetiklensin (default %20). */
   @IsNumber()
   @Min(0)
   @Max(50)
   @IsOptional()
   reserveThresholdPct?: number;
+
+  /** Otoyol seyir hızı km/h (default 110). Yakıt hesabında hız faktörü için. */
+  @IsInt()
+  @Min(60)
+  @Max(150)
+  @IsOptional()
+  cruisingSpeedKph?: number;
+
+  /** Motor hacmi litre (örn. 1.6). AC faktörü için. Bilinmiyorsa DB'den okunur. */
+  @IsNumber()
+  @Min(0.5)
+  @Max(10)
+  @IsOptional()
+  engineDisplacementL?: number;
 }
 
 export { CreateRouteDto };

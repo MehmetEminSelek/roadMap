@@ -127,8 +127,12 @@ export interface CreateRouteRequest {
   hasClimateControl?: boolean;
   /** Yola çıkarken depodaki yakıt yüzdesi (0-100). */
   initialFuelPct?: number;
-  /** İkmal tetikleyici yüzde (default 10). */
+  /** İkmal tetikleyici yüzde (default 20). */
   reserveThresholdPct?: number;
+  /** Otoyol seyir hızı km/h (default 110) — yakıt hız faktörü için. */
+  cruisingSpeedKph?: number;
+  /** Motor hacmi litre (ör. 1.6) — AC faktörünü ölçeklemek için. */
+  engineDisplacementL?: number;
 }
 
 export interface FuelStop {

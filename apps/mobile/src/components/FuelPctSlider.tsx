@@ -22,10 +22,11 @@ export function FuelPctSlider({ value, onChange, label = 'Başlangıç Depo Sevi
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        const x = e.nativeEvent.locationX;
-        const pct = clamp(Math.round((x / Math.max(trackWidthRef.current, 1)) * 100));
-        onChangeRef.current(pct);
+      onPanResponderGrant: () => {
+        // Grant: intentionally empty — ilk dokunuşta snap YAPMA.
+        // Değer sadece kullanıcı sürüklediğinde (onPanResponderMove) değişir.
+        // Aksi halde kullanıcı slider'ın soluna dokunup sürüklemeye başladığında
+        // değer anında ~%10'a düşüyordu.
       },
       onPanResponderMove: (e) => {
         const x = e.nativeEvent.locationX;
