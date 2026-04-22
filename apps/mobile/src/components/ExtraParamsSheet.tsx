@@ -9,9 +9,13 @@
  * başlamış oluyor — kullanıcı ayarlarla uğraşırken request cevaplanıyor ve
  * confirm'de navigate anında gerçekleşiyor.
  *
- * Hız + klima faktörleri client-side uygulanıyor (speed^1.8 modeli ve
- * 1.6L default motor hacminde %6 klima etkisi). Backend'in döndürdüğü
- * fuelCost üzerine tek çarpma → ikinci API gerekmiyor.
+ * Hız + klima faktörleri şimdilik basit modellerle uygulanıyor (speed^1.8
+ * ve 1.6L default motor hacminde sabit klima katsayısı). Bu yaklaşık bir
+ * hesap; ileride ADAC/ÇEVB gibi gerçek dynamometre verisiyle kalibre
+ * edilmiş bir algoritmayla değiştirilecek → AR-GE notu bkz. (TODO).
+ *
+ * Kullanıcıya yüzde göstermiyoruz çünkü rakamlar şu an kaba bir tahmin;
+ * yanıltıcı olabilir. Sadece "seçim yap, fuelCost'a yansısın" kalıyor.
  */
 import { useRef, useState, useEffect } from 'react';
 import {
@@ -41,12 +45,6 @@ interface Props {
   onConfirm: (params: ExtraParams) => void;
   onCancel: () => void;
 }
-
-/** Speed factor: (kph/90)^1.8, clamp [0.80, 1.60] */
-const calcSpeedF = (kph: number) =>
-  Math.max(0.8, Math.min(1.6, Math.pow(kph / 90, 1.8)));
-/** AC factor at default 1.6L displacement */
-const calcAcF = (on: boolean) => (on ? 1.06 : 1.0);
 
 const SPEEDS = [80, 90, 100, 110, 120, 130, 140];
 const DEFAULT_SPEED = 110;
@@ -80,18 +78,6 @@ export function ExtraParamsSheet({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
-
-  // Varsayılana göre yakıt etkisi
-  const defaultMul = calcSpeedF(DEFAULT_SPEED) * calcAcF(true);
-  const currentMul = calcSpeedF(speedKph) * calcAcF(acOn);
-  const diffPct = Math.round((currentMul / defaultMul - 1) * 100);
-  const impactLabel =
-    diffPct > 0
-      ? `+%${diffPct} yakıt`
-      : diffPct < 0
-        ? `-%${Math.abs(diffPct)} yakıt`
-        : 'varsayılan';
-  const impactColor = diffPct > 0 ? '#FF3B30' : diffPct < 0 ? '#34C759' : '#8E8E93';
 
   return (
     <Modal
@@ -130,19 +116,12 @@ export function ExtraParamsSheet({
         <View style={s.row}>
           <View style={{ flex: 1, paddingRight: 12 }}>
             <Text style={s.sectionLabel}>Klima</Text>
-            <Text style={s.sub}>Motor hacmine göre %2-8 etki</Text>
           </View>
           <Switch
             value={acOn}
             onValueChange={setAcOn}
             trackColor={{ true: '#0A84FF', false: '#D1D5DB' } as any}
           />
-        </View>
-
-        {/* Etki göstergesi */}
-        <View style={s.impactBar}>
-          <Text style={s.impactLabel}>Varsayılana göre yakıt etkisi</Text>
-          <Text style={[s.impactValue, { color: impactColor }]}>{impactLabel}</Text>
         </View>
 
         {/* Fuel slider — sadece araç seçiliyse */}
@@ -201,7 +180,6 @@ const s = StyleSheet.create({
     marginBottom: 8,
     letterSpacing: 0.3,
   },
-  sub: { fontSize: 11, color: '#8E8E93' },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -220,17 +198,6 @@ const s = StyleSheet.create({
   chipVal: { fontSize: 18, fontWeight: '700', color: '#1C1C1E' },
   chipValActive: { color: 'white' },
   chipUnit: { fontSize: 9, color: '#6B7280', fontWeight: '600', marginTop: 1 },
-  impactBar: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    padding: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  impactLabel: { fontSize: 13, color: '#6B7280', fontWeight: '600' },
-  impactValue: { fontSize: 14, fontWeight: '800' },
   confirmBtn: {
     backgroundColor: '#0A84FF',
     borderRadius: 18,

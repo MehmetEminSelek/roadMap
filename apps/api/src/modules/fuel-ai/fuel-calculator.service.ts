@@ -16,6 +16,19 @@ export interface ConsumptionFactors {
  * `FuelSimulationService`'in aynı faktörleri kullanabilmesi için ayrıştırıldı.
  *
  * Değerler FuelAiService + FuelSimulationService tarafından tüketilir.
+ *
+ * ⚠️ TODO — GEÇİCİ MODEL (araştırma sonrası yerine gerçek algoritma gelecek):
+ *   Şu an kullanılan (kph/90)^1.8 ve motor-hacmine-göre-sabit klima katsayısı
+ *   kaba yaklaşımlar. Gerçek tüketim şu parametrelerden de etkilenir:
+ *     - Eğim (rota yükseklik profili)
+ *     - Hava sıcaklığı + rüzgar
+ *     - Yük + yolcu sayısı
+ *     - Vites tipi (otomatik/manuel), lastik basıncı
+ *     - Araç yaşı, bakım durumu
+ *   Araştırma yapıldıktan sonra (muhtemelen ADAC/EPA dynamometre datasıyla
+ *   kalibre edilmiş bir ML modeli veya fiziğe dayalı analitik formül) bu
+ *   sınıfın iç metodları değişecek; public interface (speedFactor/acFactor/
+ *   combinedFactor) aynı kalabilir.
  */
 @Injectable()
 export class FuelCalculatorService {
