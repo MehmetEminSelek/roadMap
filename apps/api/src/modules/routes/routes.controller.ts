@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, Param, Delete, UseGuards, Request, Query, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Delete, UseGuards, Request, Query, Inject } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { RoutesService } from './routes.service';
 import { GoogleMapsService } from './google-maps.service';
 import { CreateRouteDto } from './dto/create-route.dto';
+import { CompleteRouteDto } from './dto/complete-route.dto';
 import { RouteQueryDto } from './dto/route-query.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { Request as ExpressRequest } from 'express';
@@ -74,5 +75,19 @@ export class RoutesController {
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req: UserRequest): Promise<any> {
     return this.routesService.remove(id, req.user.sub);
+  }
+
+  /**
+   * Post-trip kalibrasyon: kullanıcı gerçek yakıt tüketimini girer, araç
+   * bazında correction factor running average ile güncellenir.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/complete')
+  completeRoute(
+    @Param('id') id: string,
+    @Body() dto: CompleteRouteDto,
+    @Request() req: UserRequest,
+  ): Promise<any> {
+    return this.routesService.completeRoute(id, req.user.sub, dto);
   }
 }

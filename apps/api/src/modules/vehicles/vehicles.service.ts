@@ -60,6 +60,23 @@ export class VehiclesService {
     });
   }
 
+  /**
+   * Post-trip kalibrasyon: `actualFuelL / estimatedL` oranını running average
+   * ile vehicle.correctionFactor'e katar. İlk 20 örnekten sonra yeni örnekler
+   * 1/20 ağırlıkla katılır — aşırı oynama önlenir.
+   */
+  async updateCorrectionFactor(vehicleId: string, newRatio: number): Promise<void> {
+    const v = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
+    if (!v) return;
+    const oldFactor = v.correctionFactor ?? 1.0;
+    const n = Math.min(20, (v.correctionSampleN ?? 0) + 1);
+    const newFactor = (oldFactor * (n - 1) + newRatio) / n;
+    await this.prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: { correctionFactor: newFactor, correctionSampleN: n },
+    });
+  }
+
   async getVehicleBrands(): Promise<{ id: string; name: string }[]> {
     return this.prisma.vehicleMake.findMany({
       orderBy: {

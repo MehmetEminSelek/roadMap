@@ -3,9 +3,16 @@
  * ----------------------------------------------------------------
  * Native slider paketine ihtiyaç duymadan, PanResponder tabanlı yatay
  * yüzde slider'ı. Depodaki yakıt yüzdesini girmek için.
+ *
+ * Önceki implementasyon `e.nativeEvent.locationX` kullanıyordu; bu parmağın
+ * track'in sol kenarına göre göreceli pozisyonu ama RN'de sürükleme
+ * sırasında tutarsız okunabiliyor (özellikle parmak track'in dışına çıkıp
+ * geri geldiğinde ya da modal içinde kullanıldığında `locationX` saçma
+ * değerler dönüyor). Çözüm: track'in ekrandaki mutlak X konumunu `measure`
+ * ile al, sonra `pageX - trackPageX` ile local pozisyonu hesapla.
  */
-import { useRef, useState } from 'react';
-import { View, Text, StyleSheet, PanResponder, LayoutChangeEvent } from 'react-native';
+import { useRef, useState, useEffect } from 'react';
+import { View, Text, StyleSheet, PanResponder } from 'react-native';
 
 interface Props {
   value: number;                 // 0-100
@@ -13,36 +20,61 @@ interface Props {
   label?: string;
 }
 
+const clamp = (n: number) => Math.max(0, Math.min(100, n));
+
 export function FuelPctSlider({ value, onChange, label = 'Başlangıç Depo Seviyesi' }: Props) {
-  const [trackWidth, setTrackWidth] = useState(0);
-  const pctRef = useRef(value);
-  pctRef.current = value;
+  const trackRef = useRef<View | null>(null);
+
+  // Track'in ekran üzerindeki konumu + genişliği — measure ile her dokunuşta
+  // yenileniyor (modal/scroll pozisyonu değişebilir).
+  const trackPageXRef = useRef(0);
+  const trackWidthRef = useRef(0);
+  const [trackWidth, setTrackWidth] = useState(0); // thumb rendering için
+
+  // onChange stabil referans — PanResponder.create closure'u içinden çağrı.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  const measureTrack = () => {
+    trackRef.current?.measure?.((_x, _y, w, _h, px) => {
+      trackPageXRef.current = px;
+      trackWidthRef.current = w;
+    });
+  };
+
+  // Component mount sonrası bir kez measure et — initial render için
+  useEffect(() => {
+    // Bir tick gecikme: react-native iOS'ta Modal içindeki measure'ın
+    // stabilleşmesi için gerekli.
+    const id = setTimeout(measureTrack, 0);
+    return () => clearTimeout(id);
+  }, []);
+
+  const computePct = (pageX: number): number => {
+    const w = trackWidthRef.current;
+    if (w <= 0) return 0;
+    const localX = pageX - trackPageXRef.current;
+    return clamp(Math.round((localX / w) * 100));
+  };
 
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        // Grant: intentionally empty — ilk dokunuşta snap YAPMA.
-        // Değer sadece kullanıcı sürüklediğinde (onPanResponderMove) değişir.
-        // Aksi halde kullanıcı slider'ın soluna dokunup sürüklemeye başladığında
-        // değer anında ~%10'a düşüyordu.
+        // Her dokunuşta measure — modal/scroll sırasında pozisyon kayabilir.
+        // Değeri DEĞİŞTİRMİYORUZ; kullanıcı sadece dokundu diye %5'e atlamasın.
+        measureTrack();
       },
       onPanResponderMove: (e) => {
-        const x = e.nativeEvent.locationX;
-        const pct = clamp(Math.round((x / Math.max(trackWidthRef.current, 1)) * 100));
-        onChangeRef.current(pct);
+        onChangeRef.current(computePct(e.nativeEvent.pageX));
+      },
+      onPanResponderRelease: (e) => {
+        // Son bir update — bazen move son pozisyonu yakalayamıyor.
+        onChangeRef.current(computePct(e.nativeEvent.pageX));
       },
     }),
   ).current;
-
-  // onChange stabil referans için
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-  const trackWidthRef = useRef(0);
-  trackWidthRef.current = trackWidth;
-
-  const onLayout = (e: LayoutChangeEvent) => setTrackWidth(e.nativeEvent.layout.width);
 
   const fillPct = clamp(value);
   const thumbLeft = (fillPct / 100) * trackWidth;
@@ -53,7 +85,16 @@ export function FuelPctSlider({ value, onChange, label = 'Başlangıç Depo Sevi
         <Text style={s.label}>{label}</Text>
         <Text style={s.value}>%{fillPct}</Text>
       </View>
-      <View style={s.track} onLayout={onLayout} {...pan.panHandlers}>
+      <View
+        ref={trackRef}
+        style={s.track}
+        onLayout={(e) => {
+          setTrackWidth(e.nativeEvent.layout.width);
+          // onLayout yeterince erken çağrıldığı için burada da measure tetikle
+          measureTrack();
+        }}
+        {...pan.panHandlers}
+      >
         <View style={[s.fill, { width: `${fillPct}%` }]} />
         {trackWidth > 0 && (
           <View style={[s.thumb, { left: thumbLeft - 12 }]} />
@@ -66,8 +107,6 @@ export function FuelPctSlider({ value, onChange, label = 'Başlangıç Depo Sevi
     </View>
   );
 }
-
-const clamp = (n: number) => Math.max(0, Math.min(100, n));
 
 const s = StyleSheet.create({
   wrap: { paddingHorizontal: 4, paddingVertical: 6 },

@@ -302,6 +302,8 @@ export default function AddVehicleScreen() {
   const [engineCap,      setEngineCap]     = useState('');
   const [weight,         setWeight]        = useState('');
   const [preferredBrand, setPreferredBrand] = useState<string | null>(null);
+  const [defaultPassengers, setDefaultPassengers] = useState<number>(1);
+  const [typicalCargoKg, setTypicalCargoKg] = useState<number>(0);
 
   const [saving,         setSaving]        = useState(false);
   const [loadingBrands,  setLoadingBrands] = useState(true);
@@ -431,6 +433,8 @@ export default function AddVehicleScreen() {
         transmission,
         hasClimateControl: true,
         preferredFuelBrand: preferredBrand || undefined,
+        defaultPassengers,
+        typicalCargoKg,
       });
       router.back();
     } catch (err: any) {
@@ -650,6 +654,52 @@ export default function AddVehicleScreen() {
                   <Text style={[s.brandChipTxt, active && { color: b.id === 'shell' ? '#1A1A1A' : '#FFF' }]}>
                     {b.label}
                   </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* ── Tipik Kullanım ─────────────────────────────────────────── */}
+        <View style={s.section}>
+          <StepHeader num={selectedModel ? '08' : '07'} label="Tipik Kullanım" done={false} />
+          <Text style={s.fieldNote}>Yakıt tahminini kişiselleştirmek için — sonradan değiştirilebilir</Text>
+
+          <Text style={[s.groupLabel, { marginTop: 16 }]}>Genelde kaç kişi?</Text>
+          <View style={s.techRow}>
+            {[1, 2, 3, 4, 5].map((n) => {
+              const active = defaultPassengers === n;
+              return (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => setDefaultPassengers(n)}
+                  activeOpacity={0.8}
+                  style={[s.brandChip, active && { backgroundColor: C.gold, borderColor: C.gold }]}
+                >
+                  <Text style={[s.brandChipTxt, active && { color: C.bg }]}>{n}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={[s.groupLabel, { marginTop: 16 }]}>Tipik bagaj</Text>
+          <View style={s.techRow}>
+            {[
+              { kg: 0, label: 'Yok' },
+              { kg: 20, label: '20 kg' },
+              { kg: 50, label: '50 kg' },
+              { kg: 100, label: '100 kg' },
+              { kg: 200, label: '200 kg' },
+            ].map(({ kg, label }) => {
+              const active = typicalCargoKg === kg;
+              return (
+                <TouchableOpacity
+                  key={kg}
+                  onPress={() => setTypicalCargoKg(kg)}
+                  activeOpacity={0.8}
+                  style={[s.brandChip, active && { backgroundColor: C.gold, borderColor: C.gold }]}
+                >
+                  <Text style={[s.brandChipTxt, active && { color: C.bg }]}>{label}</Text>
                 </TouchableOpacity>
               );
             })}

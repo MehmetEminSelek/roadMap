@@ -189,4 +189,6 @@ export interface RouteWithAdvisory {
   legacy: DirectionsResult;
   tollInfo?: RoutesV2TollInfo;
   fuelConsumptionMicroliters?: number;
+  /** Route-level encoded polyline — Elevation API çağrısında path olarak kullanılır. */
+  encodedPolyline?: string;
 }

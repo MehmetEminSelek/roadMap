@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
 import { PrismaService } from './prisma/prisma.service';
 import { CommonModule } from './common/common.module';
@@ -25,6 +26,7 @@ function validateConfig(config: Record<string, unknown>) {
     'GOOGLE_GENERATIVE_AI_API_KEY',
     'DATABASE_URL',
     'JWT_SECRET',
+    'OPENWEATHERMAP_API_KEY',
   ];
 
   const missing: string[] = [];
@@ -54,6 +56,7 @@ function validateConfig(config: Record<string, unknown>) {
       validate: validateConfig,
     }),
     AppCacheModule,
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{
       ttl: 60000,
       limit: 60,

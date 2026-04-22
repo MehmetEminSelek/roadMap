@@ -47,4 +47,23 @@ export const routeService = {
     const response = await apiClient.get('/routes/autocomplete', { params: { input } });
     return response.data;
   },
+
+  /**
+   * Post-trip calibration: kullanıcı gerçek yakıt tüketimini girer.
+   * Backend araç başına correction factor'ü running avg ile günceller.
+   */
+  async completeRoute(
+    routeId: string,
+    actualFuelL: number,
+  ): Promise<{
+    success: boolean;
+    calibrated: boolean;
+    deltaRatio?: number;
+    newCorrectionFactor?: number;
+    samples?: number;
+    reason?: string;
+  }> {
+    const response = await apiClient.patch(`/routes/${routeId}/complete`, { actualFuelL });
+    return response.data;
+  },
 };

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 
 /**
  * Seyahat koşulları — her alan opsiyonel. Verilmeyen koşullar "nötr" kabul
@@ -89,14 +89,21 @@ export interface ConsumptionFactors {
  */
 @Injectable()
 export class FuelCalculatorService {
+  private readonly logger = new Logger(FuelCalculatorService.name);
+
   // ───────────────────────── FİZİK SABİTLERİ ─────────────────────────────
   private static readonly Tunables = {
     // Speed model: referans hızda rolling/aero yakıt payı
+    // Not: saf v² modeli ADAC gerçek dünya verisine göre yüksek hızlarda
+    // overshoot yapıyordu (130 kph'de +43% göstiyordu, gerçek ~+22%). Rolling
+    // share'i 0.75'e çektik + exponent'i 1.8'e düşürdük → sedan cruise data'sına
+    // çok daha yakın:  90→1.00, 110→1.11, 130→1.23, 140→1.29
     SPEED_REF_KPH: 90,
-    ROLLING_SHARE: 0.60, // 60% rolling resistance @ 90 kph
-    AERO_SHARE: 0.40,    // 40% aero drag @ 90 kph (v² ile büyür)
-    SPEED_MIN: 0.80,     // clamp
-    SPEED_MAX: 1.70,
+    ROLLING_SHARE: 0.75,
+    AERO_SHARE: 0.25,
+    AERO_EXPONENT: 1.8,
+    SPEED_MIN: 0.80,
+    SPEED_MAX: 1.40,     // clamp — ultra high speed penalty reasonable
 
     // AC compressor model: P_ac = base + slope·(T - baseline), clamp [base, max]
     AC_BASE_KW: 0.4,           // kompresör clutch + fan minimum
@@ -116,9 +123,16 @@ export class FuelCalculatorService {
     AIR_DENSITY_PCT_PER_C: -0.0034, // ideal gas: ρ ∝ 1/T; ~-0.34%/°C around 20°C
 
     // Elevation: potential energy / fuel energy
+    // Not: Ham cumulative climb kullanmak overshoot yapıyor çünkü gerçek dünyada
+    // araç iniş kısımlarında yakıt yakmıyor (engine braking, coast down) →
+    // tırmanışın büyük kısmı "geri kazanılıyor". DESCENT_RECOVERY: inişlerde
+    // enerjinin ne kadarı "bedava" (yakıt yakılmıyor). 0.75 = iniş sırasında
+    // %75 bedava kazanıyorsun, effective climb = climb * (1-0.75) = climb/4.
     GRAVITY_MS2: 9.81,
     FUEL_ENERGY_MJ_PER_L: 32.0,   // benzin alt ısıl değer (dizel 36, LPG 25)
     ENGINE_BRAKE_EFF: 0.25,       // ICE ortalama brake verimliliği
+    DESCENT_RECOVERY: 0.75,       // inişte kurtarılan % (0 = hiç, 1 = tamamı)
+    ELEV_FACTOR_MAX: 1.20,        // clamp — ≥%20 extra tek başına ayrı işaret
 
     // Load: her 100 kg için rolling + climb yakıt cezası
     LOAD_PCT_PER_100KG: 0.05,     // %5 @ 100kg (rolling ∝ m, climb ∝ m)
@@ -156,11 +170,12 @@ export class FuelCalculatorService {
    *                |  140 → 1.57
    */
   speedFactor(speedKph?: number): number {
-    const { SPEED_REF_KPH, ROLLING_SHARE, AERO_SHARE, SPEED_MIN, SPEED_MAX } =
+    const { SPEED_REF_KPH, ROLLING_SHARE, AERO_SHARE, AERO_EXPONENT, SPEED_MIN, SPEED_MAX } =
       FuelCalculatorService.Tunables;
     if (!speedKph || speedKph <= 0) return 1.0;
     const ratio = speedKph / SPEED_REF_KPH;
-    const raw = ROLLING_SHARE + AERO_SHARE * ratio * ratio;
+    // Güç mix: rolling (lineer'e yakın) + aero (v^1.8). ADAC data ile kalibre.
+    const raw = ROLLING_SHARE + AERO_SHARE * Math.pow(ratio, AERO_EXPONENT);
     return Math.max(SPEED_MIN, Math.min(SPEED_MAX, raw));
   }
 
@@ -266,7 +281,7 @@ export class FuelCalculatorService {
     massKg?: number;
     baseL100?: number;
   }): number {
-    const { GRAVITY_MS2, FUEL_ENERGY_MJ_PER_L, ENGINE_BRAKE_EFF } =
+    const { GRAVITY_MS2, FUEL_ENERGY_MJ_PER_L, ENGINE_BRAKE_EFF, DESCENT_RECOVERY, ELEV_FACTOR_MAX } =
       FuelCalculatorService.Tunables;
     const climb = params.elevationGainM ?? 0;
     const dist = params.distanceKm ?? 0;
@@ -275,12 +290,18 @@ export class FuelCalculatorService {
     const mass = params.massKg ?? FuelCalculatorService.Tunables.DEFAULT_VEHICLE_MASS_KG;
     const baseL100 = params.baseL100 ?? 7.5;
 
-    // Ek iş (MJ)
-    const eClimbMj = (mass * GRAVITY_MS2 * climb) / 1_000_000;
+    // Etkili tırmanış = ham climb × (1 - descent_recovery).
+    // Gerekçe: bir rotanın tırmanış toplamının büyük kısmı dengi iniş toplamıyla
+    // eşleşiyor. İnişte yakıt yakılmıyor (engine braking, coast). Dolayısıyla net
+    // "ek yakıt harcaması" cumulative climb'in küçük bir yüzdesi.
+    const effectiveClimb = climb * (1 - DESCENT_RECOVERY);
+
+    const eClimbMj = (mass * GRAVITY_MS2 * effectiveClimb) / 1_000_000;
     const lExtra = eClimbMj / (ENGINE_BRAKE_EFF * FUEL_ENERGY_MJ_PER_L);
     const lBase = (dist * baseL100) / 100;
     if (lBase <= 0) return 1.0;
-    return 1.0 + lExtra / lBase;
+    const raw = 1.0 + lExtra / lBase;
+    return Math.min(ELEV_FACTOR_MAX, raw);
   }
 
   /**
@@ -339,6 +360,15 @@ export class FuelCalculatorService {
     // backward-compat: hasClimateControl → acOn
     const acOn = cond.acOn ?? cond.hasClimateControl ?? true;
 
+    this.logger.log(
+      `[FuelCalc] IN: speed=${cond.speedKph ?? '—'} kph, ac=${acOn ? 'on' : 'off'}, ` +
+      `temp=${cond.ambientTempC ?? '—'}°C, wind=${cond.headwindKph?.toFixed(1) ?? '—'} kph, ` +
+      `rain=${cond.rainLevel ?? '—'}, elev=${cond.elevationGainM?.toFixed(0) ?? '—'}m, ` +
+      `load=${cond.extraLoadKg ?? 0}kg, disp=${cond.engineDisplacementL ?? 1.6}L, ` +
+      `dist=${cond.distanceKm?.toFixed(0) ?? '—'}km, dur=${cond.durationSeconds ?? '—'}s, ` +
+      `baseL100=${cond.baseL100 ?? 7.5}`,
+    );
+
     const speed = this.speedFactor(cond.speedKph);
     const ac = this.acFactor({
       acOn,
@@ -348,11 +378,12 @@ export class FuelCalculatorService {
     });
     const temperature = this.temperatureFactor(cond.ambientTempC);
     const wind = this.windFactor(cond.speedKph, cond.headwindKph);
+    const mass = (cond.vehicleMassKg ?? FuelCalculatorService.Tunables.DEFAULT_VEHICLE_MASS_KG) +
+                 (cond.extraLoadKg ?? 0);
     const elevation = this.elevationFactor({
       elevationGainM: cond.elevationGainM,
       distanceKm: cond.distanceKm,
-      massKg: (cond.vehicleMassKg ?? FuelCalculatorService.Tunables.DEFAULT_VEHICLE_MASS_KG) +
-             (cond.extraLoadKg ?? 0),
+      massKg: mass,
       baseL100: cond.baseL100,
     });
     const load = this.loadFactor(cond.extraLoadKg);
@@ -360,6 +391,18 @@ export class FuelCalculatorService {
     const traffic = this.trafficFactor(cond.durationSeconds, cond.distanceKm);
 
     const combined = speed * ac * temperature * wind * elevation * load * rain * traffic;
+    const pctDelta = ((combined - 1) * 100).toFixed(1);
+
+    // Her faktörü ayrı satırla yazdır — hangilerinin dominant olduğu net görünür
+    this.logger.log(
+      `[FuelCalc] FACTORS: speed=${speed.toFixed(3)} · ac=${ac.toFixed(3)} · ` +
+      `temp=${temperature.toFixed(3)} · wind=${wind.toFixed(3)} · ` +
+      `elev=${elevation.toFixed(3)} · load=${load.toFixed(3)} · ` +
+      `rain=${rain.toFixed(3)} · traffic=${traffic.toFixed(3)}`,
+    );
+    this.logger.log(
+      `[FuelCalc] → COMBINED = ${combined.toFixed(3)}  (${pctDelta}% vs nötr baseline)`,
+    );
 
     return {
       speed,

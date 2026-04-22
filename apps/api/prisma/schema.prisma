@@ -43,6 +43,15 @@ model Vehicle {
   transmission        Transmission
   hasClimateControl   Boolean   @default(true)
   preferredFuelBrand  String?   // 'opet' | 'shell' | 'po' | 'bp' — null ise Opet default
+
+  // Tipik kullanım — yakıt faktörlerine (load) besler
+  defaultPassengers   Int       @default(1)   // sürücü dahil
+  typicalCargoKg      Int       @default(0)
+
+  // Kalibrasyon — post-trip `actualFuelL` girildikçe running avg güncellenir
+  correctionFactor    Float     @default(1.0) // actualL / estimatedL running avg
+  correctionSampleN   Int       @default(0)   // örnek sayısı (20'de clamp)
+
   createdAt           DateTime  @default(now())
 
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -157,6 +166,17 @@ model Route {
   aiConfidence        Float?
 
   status              RouteStatus   @default(COMPLETED)
+
+  // Post-trip calibration: kullanıcı gerçek yakıtı girerse
+  actualFuelL         Float?
+  completedAt         DateTime?
+
+  // Çevresel snapshot — audit + future ML training data
+  ambientTempC        Float?
+  headwindKph         Float?        // + head, - tail
+  rainLevel           Int?          // 0-3
+  elevationGainM      Float?
+  extraLoadKg         Float?
 
   user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   vehicle             Vehicle?      @relation(fields: [vehicleId], references: [id])

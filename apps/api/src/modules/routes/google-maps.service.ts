@@ -209,6 +209,8 @@ export class GoogleMapsService {
               legacy,
               tollInfo: r.travelAdvisory?.tollInfo,
               fuelConsumptionMicroliters: fuelStr ? Number(fuelStr) : undefined,
+              // Elevation API için route-level encoded polyline
+              encodedPolyline: r.polyline?.encodedPolyline,
             };
           });
 
@@ -451,6 +453,89 @@ export class GoogleMapsService {
         lng: result.geometry.location.lng,
       };
     } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Route polyline'ından toplam tırmanış + iniş (m) hesapla.
+   *
+   * Encoded polyline 10KB+ olunca Google Elevation API'nin URL limit'ini
+   * aşıyor (INVALID_REQUEST). Onun yerine polyline'ı decode edip 40 waypoint'e
+   * sub-sample ediyoruz ve `path=lat,lng|lat,lng|...` formatında gönderiyoruz.
+   * Google bu waypoint'ler arasında interpolate edip 256 örnek döndürüyor.
+   *
+   * `climb` sadece pozitif farkları topluyor (yokuş yukarı toplamı);
+   * `descent` inişlerin mutlak değeri.
+   *
+   * Hata durumunda `null`. Caller `elevationGainM: 0` kullanmalı.
+   */
+  async getElevationProfile(encodedPolyline: string): Promise<{
+    totalClimbM: number;
+    totalDescentM: number;
+    samples: number;
+  } | null> {
+    if (!encodedPolyline) return null;
+
+    // Decode + sub-sample — URL'i kısa tut (max ~40 waypoint, ~1KB)
+    const { decodePolyline } = await import('../../common/geo/polyline-decode');
+    const coords = decodePolyline(encodedPolyline);
+    if (coords.length < 2) return null;
+
+    const MAX_WAYPOINTS = 40;
+    const step = Math.max(1, Math.ceil(coords.length / MAX_WAYPOINTS));
+    const waypoints: Array<{ lat: number; lng: number }> = [];
+    for (let i = 0; i < coords.length; i += step) waypoints.push(coords[i]);
+    // Son noktayı garanti et (adım tam bölmediyse kayboluyor)
+    if (waypoints[waypoints.length - 1] !== coords[coords.length - 1]) {
+      waypoints.push(coords[coords.length - 1]);
+    }
+    const pathParam = waypoints.map((p) => `${p.lat},${p.lng}`).join('|');
+
+    const delay = await this.rateLimiter.acquireLimit(this.rateLimitKey, 60, 60000);
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+
+    try {
+      return await this.retryService.executeWithRetry(
+        async () => {
+          const response: AxiosResponse<{
+            status: string;
+            error_message?: string;
+            results?: Array<{ elevation: number; location: { lat: number; lng: number } }>;
+          }> = await firstValueFrom(
+            this.httpService.get(`${this.apiUrl}/elevation/json`, {
+              params: {
+                path: pathParam,
+                samples: 256,
+                key: this.apiKey,
+              },
+              timeout: 10000,
+            }),
+          );
+
+          const { status, error_message, results } = response.data;
+          if (status !== 'OK' || !results || results.length === 0) {
+            console.warn(`[GoogleMaps] Elevation returned ${status}: ${error_message ?? 'no results'}`);
+            return null;
+          }
+
+          let climb = 0;
+          let descent = 0;
+          for (let i = 1; i < results.length; i++) {
+            const dh = results[i].elevation - results[i - 1].elevation;
+            if (dh > 0) climb += dh;
+            else descent += -dh;
+          }
+          console.log(
+            `[GoogleMaps] Elevation: +${climb.toFixed(0)}m / -${descent.toFixed(0)}m over ${results.length} samples (${waypoints.length} waypoints)`,
+          );
+          return { totalClimbM: climb, totalDescentM: descent, samples: results.length };
+        },
+        { maxRetries: 3, baseDelayMs: 1000 },
+        'Google Elevation',
+      );
+    } catch (error: any) {
+      console.error('[GoogleMaps] Elevation fetch failed:', error?.message || error);
       return null;
     }
   }

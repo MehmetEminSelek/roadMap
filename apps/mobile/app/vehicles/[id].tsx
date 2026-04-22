@@ -41,6 +41,8 @@ export default function EditVehicleScreen() {
   const [enginePower, setEnginePower] = useState('');
   const [engineCapacity, setEngineCapacity] = useState('');
   const [weight, setWeight] = useState('');
+  const [defaultPassengers, setDefaultPassengers] = useState(1);
+  const [typicalCargoKg, setTypicalCargoKg] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -56,6 +58,8 @@ export default function EditVehicleScreen() {
       setEnginePower(String(data.enginePower));
       setEngineCapacity(String(data.engineCapacity));
       setWeight(String(data.weight));
+      setDefaultPassengers(data.defaultPassengers ?? 1);
+      setTypicalCargoKg(data.typicalCargoKg ?? 0);
     } catch (err: any) {
       Alert.alert('Hata', err.message);
       router.back();
@@ -78,6 +82,8 @@ export default function EditVehicleScreen() {
         enginePower: parseInt(enginePower) || vehicle?.enginePower || 100,
         engineCapacity: parseInt(engineCapacity) || vehicle?.engineCapacity || 1600,
         weight: parseInt(weight) || vehicle?.weight || 1300,
+        defaultPassengers,
+        typicalCargoKg,
       });
       router.back();
     } catch (err: any) {
@@ -229,6 +235,65 @@ export default function EditVehicleScreen() {
             placeholderTextColor={C.textSoft}
             selectionColor={C.gold}
           />
+        </View>
+
+        {/* ── Tipik Kullanım ──────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>TİPİK KULLANIM</Text>
+
+          <Text style={[styles.inputLabel, { marginTop: 8 }]}>Yolcu sayısı (sürücü dahil)</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            {[1, 2, 3, 4, 5].map((n) => {
+              const active = defaultPassengers === n;
+              return (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => setDefaultPassengers(n)}
+                  activeOpacity={0.8}
+                  style={{
+                    paddingHorizontal: 18,
+                    paddingVertical: 10,
+                    borderRadius: 12,
+                    backgroundColor: active ? C.gold : 'transparent',
+                    borderWidth: 1,
+                    borderColor: active ? C.gold : C.border,
+                  }}
+                >
+                  <Text style={{ color: active ? C.bg : C.text, fontWeight: '600' }}>{n}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={[styles.inputLabel, { marginTop: 16 }]}>Tipik bagaj</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            {[
+              { kg: 0, label: 'Yok' },
+              { kg: 20, label: '20 kg' },
+              { kg: 50, label: '50 kg' },
+              { kg: 100, label: '100 kg' },
+              { kg: 200, label: '200 kg' },
+            ].map(({ kg, label }) => {
+              const active = typicalCargoKg === kg;
+              return (
+                <TouchableOpacity
+                  key={kg}
+                  onPress={() => setTypicalCargoKg(kg)}
+                  activeOpacity={0.8}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    borderRadius: 12,
+                    backgroundColor: active ? C.gold : 'transparent',
+                    borderWidth: 1,
+                    borderColor: active ? C.gold : C.border,
+                  }}
+                >
+                  <Text style={{ color: active ? C.bg : C.text, fontWeight: '600' }}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
 
         {/* ── Save Button ───────────────────────── */}

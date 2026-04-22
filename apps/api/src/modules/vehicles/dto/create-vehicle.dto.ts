@@ -35,9 +35,23 @@ class CreateVehicleDto {
 
   /** İkmal simülasyonunda kullanılacak yakıt markası. Null → Opet default. */
   @IsString()
-  @IsIn(['opet', 'shell', 'po', 'bp'])
+  @IsIn(['opet', 'shell', 'po', 'total'])
   @IsOptional()
   preferredFuelBrand?: string;
+
+  /** Genelde kaç kişi taşıyor (sürücü dahil). Yakıt yük faktörü için. Default 1. */
+  @IsInt()
+  @Min(1)
+  @Max(9)
+  @IsOptional()
+  defaultPassengers?: number;
+
+  /** Tipik bagaj ağırlığı kg. Default 0. */
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  @IsOptional()
+  typicalCargoKg?: number;
 }
 
 export { CreateVehicleDto };

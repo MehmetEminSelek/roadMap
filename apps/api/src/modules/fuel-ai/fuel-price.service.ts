@@ -1,11 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BrandPriceFetcher, BrandPrices } from './brand-fetchers/base.fetcher';
 import { OpetFetcher } from './brand-fetchers/opet.fetcher';
 import { ShellFetcher } from './brand-fetchers/shell.fetcher';
 import { PetrolOfisiFetcher } from './brand-fetchers/po.fetcher';
-import { BpFetcher } from './brand-fetchers/bp.fetcher';
+import { TotalFetcher } from './brand-fetchers/total.fetcher';
 
 export interface FuelPrices {
   petrol: number;
@@ -22,8 +23,8 @@ export interface BrandPriceSnapshot {
 }
 
 const DEFAULT_PROVINCE = 34; // İstanbul — backward compat + carousel default
-const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 saat
-const STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000;  // boot'ta 6 saatten eskiyse refresh
+// Saatlik refresh → @Cron('0 * * * *')'da ayarlı. Boot'ta 1 saatten eskiyse hemen tetikle.
+const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 saat
 
 @Injectable()
 export class FuelPriceService implements OnModuleInit {
@@ -45,15 +46,22 @@ export class FuelPriceService implements OnModuleInit {
   private priceCache = new Map<string, BrandPrices>();
   private lastRefreshAt: Date | null = null;
 
+  /**
+   * Overlap koruması: Shell Playwright ~2 dk sürüyor. Bir sonraki saatlik cron
+   * önceki refresh hala çalışırken tetiklenirse iki Chromium paralel açılır ve
+   * DevExpress session'ı karışır. İkinci tetiklemeyi sessizce pas geç.
+   */
+  private refreshing = false;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     opet: OpetFetcher,
     shell: ShellFetcher,
     po: PetrolOfisiFetcher,
-    bp: BpFetcher,
+    total: TotalFetcher,
   ) {
-    this.fetchers = [opet, shell, po, bp];
+    this.fetchers = [opet, shell, po, total];
     for (const f of this.fetchers) this.fetcherById.set(f.brandId, f);
 
     // ConfigService env'i string döner; Number() ile coerce etmezsek
@@ -68,31 +76,57 @@ export class FuelPriceService implements OnModuleInit {
     // DB'den mevcut cache'i yükle
     await this.loadCacheFromDb();
 
-    // Son fetch 6+ saatlik ise refresh tetikle; değilse pas geç
+    // Son fetch 1+ saatlik ise boot'ta hemen refresh; değilse bir sonraki saat
+    // cron'una bırak.
     const newest = await this.prisma.brandProvincePrice.findFirst({
       orderBy: { updatedAt: 'desc' },
       select: { updatedAt: true },
     });
     const age = newest ? Date.now() - newest.updatedAt.getTime() : Infinity;
     if (age > STALE_THRESHOLD_MS) {
-      this.logger.log(`DB cache ${Math.round(age / 3600_000)}h eski → refresh…`);
+      this.logger.log(`DB cache ${Math.round(age / 60_000)}dk eski → boot refresh…`);
       this.refreshAll().catch((e) => this.logger.error(`Initial refresh failed: ${e.message}`));
     } else {
-      this.logger.log(`DB cache taze (${Math.round(age / 60_000)}dk) — refresh'e gerek yok.`);
+      this.logger.log(`DB cache taze (${Math.round(age / 60_000)}dk) — boot refresh'e gerek yok.`);
     }
+  }
 
-    setInterval(() => {
-      this.refreshAll().catch((e) => this.logger.error(`Periodic refresh failed: ${e.message}`));
-    }, REFRESH_INTERVAL_MS);
+  /**
+   * Saatlik cron — her saatin 0. dakikasında çalışır (UTC).
+   * Örn: 00:00, 01:00, 02:00… 4 markayı paralel refresh eder.
+   *
+   * @Cron overlap koruması: `refreshing` flag'i ile önceki iş bitmediyse pas geç.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async scheduledRefresh() {
+    if (this.refreshing) {
+      this.logger.warn('Önceki refresh hala çalışıyor, bu tetiklemeyi atlıyorum.');
+      return;
+    }
+    try {
+      await this.refreshAll();
+    } catch (e: any) {
+      this.logger.error(`Scheduled refresh failed: ${e.message}`);
+    }
   }
 
   /** Tüm markaları paralel olarak çeker ve DB'ye upsert eder. */
   async refreshAll() {
-    this.logger.log(`Refreshing fuel prices for ${this.fetchers.length} brand(s)…`);
-    await Promise.all(this.fetchers.map((f) => this.refreshOne(f)));
-    await this.loadCacheFromDb();
-    this.lastRefreshAt = new Date();
-    this.logger.log('Refresh complete.');
+    if (this.refreshing) {
+      this.logger.warn('refreshAll çağrıldı ama zaten refresh var; bekleniyor yerine atla.');
+      return;
+    }
+    this.refreshing = true;
+    const t0 = Date.now();
+    try {
+      this.logger.log(`Refreshing fuel prices for ${this.fetchers.length} brand(s)…`);
+      await Promise.all(this.fetchers.map((f) => this.refreshOne(f)));
+      await this.loadCacheFromDb();
+      this.lastRefreshAt = new Date();
+      this.logger.log(`Refresh complete (${Math.round((Date.now() - t0) / 1000)}s).`);
+    } finally {
+      this.refreshing = false;
+    }
   }
 
   private async refreshOne(fetcher: BrandPriceFetcher) {

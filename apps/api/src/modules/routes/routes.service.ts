@@ -7,12 +7,17 @@ import { FuelAiService } from '../fuel-ai/fuel-ai.service';
 import { FuelSimulationService } from '../fuel-ai/fuel-simulation.service';
 import { TollsService } from '../tolls/tolls.service';
 import { PlacesService } from '../places/places.service';
+import { WeatherService } from '../weather/weather.service';
+import { VehiclesService } from '../vehicles/vehicles.service';
+import { CompleteRouteDto } from './dto/complete-route.dto';
+import { FuelPriceService } from '../fuel-ai/fuel-price.service';
 import { RouteStatus } from '@prisma/client';
 import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
 import { normalizeTr } from '../../common/text/normalize-tr';
 import { buildCityCacheKey } from '../../common/text/extract-city';
 import { extractProvincesFromCoords } from '../../common/geo/route-provinces';
 import { decodeSteps as decodeStepsUtil } from '../../common/geo/polyline-decode';
+import { computeBearing, headwindComponent } from '../../common/geo/bearing';
 
 @Injectable()
 export class RoutesService {
@@ -23,6 +28,9 @@ export class RoutesService {
     private fuelSim: FuelSimulationService,
     private tolls: TollsService,
     private places: PlacesService,
+    private weather: WeatherService,
+    private vehicles: VehiclesService,
+    private fuelPrice: FuelPriceService,
     @Inject(CACHE_MANAGER) private cache: Cache,
   ) { }
 
@@ -38,7 +46,8 @@ export class RoutesService {
     //     ama toll/fuel hesabı kullanıcının aracına göre yeniden yapılır.
     // ─────────────────────────────────────────────────────────────────
 
-    const exactCacheKey = `route:exact:v1:${normalizeTr(origin)}|${normalizeTr(destination)}|${vehicleId ?? 'anon'}|${!!createRouteDto.hasClimateControl}`;
+    // v2: çevresel enrichment + correction factor eklenince cache formatı değişti
+    const exactCacheKey = `route:exact:v2:${normalizeTr(origin)}|${normalizeTr(destination)}|${vehicleId ?? 'anon'}|${!!createRouteDto.hasClimateControl}`;
     const cityCacheKey = buildCityCacheKey(origin, destination);
 
     // Katman 1: Birebir aynı arama — tam cache hit
@@ -107,32 +116,121 @@ export class RoutesService {
     // ─────────────────────────────────────────────────────────────────
     // 4-8. FULL PARALLEL FAN-OUT
     // Tüm ağır işler (toll, fuel, alternatifler, stops, rest areas)
-    // tek bir Promise.all içinde eş zamanlı çalışır.
-    // Toplam süre = en yavaş tek çağrı süresi
+    // + çevresel enrichment (weather, elevation) tek bir Promise.all
+    // içinde eş zamanlı çalışır.
     // ─────────────────────────────────────────────────────────────────
+
+    // ─── Çevresel enrichment: weather (origin) + elevation (polyline) ───
+    // DTO'da explicit değer varsa onu tercih ediyoruz (client-provided override).
+    // Yoksa backend fetch ediyor. Hata durumunda null → nötr factor.
+    const originLat = leg.start_location.lat;
+    const originLng = leg.start_location.lng;
+    const destLat = leg.end_location.lat;
+    const destLng = leg.end_location.lng;
+
+    console.log(
+      `[Routes] ═══ ENRICHMENT START ═══ origin=(${originLat.toFixed(4)},${originLng.toFixed(4)}) ` +
+      `dest=(${destLat.toFixed(4)},${destLng.toFixed(4)}) distance=${distanceKm.toFixed(1)}km`,
+    );
+
+    const weatherPromise = this.weather
+      .fetchCurrent(originLat, originLng)
+      .catch((e) => {
+        console.warn('[Routes] Weather fetch failed:', e?.message);
+        return null;
+      });
+
+    const encodedPolyline = primary.encodedPolyline;
+    const elevationPromise = encodedPolyline
+      ? this.googleMaps.getElevationProfile(encodedPolyline).catch((e) => {
+          console.warn('[Routes] Elevation fetch failed:', e?.message);
+          return null;
+        })
+      : Promise.resolve(null);
+
+    // Vehicle'dan extra load hesapla — defaultPassengers − 1 (sürücü EPA'da zaten sayılı)
+    // × 75kg/kişi + typicalCargoKg.
+    const extraLoadKgFromVehicle = vehicle
+      ? Math.max(0, ((vehicle.defaultPassengers ?? 1) - 1) * 75 + (vehicle.typicalCargoKg ?? 0))
+      : 0;
+    const extraLoadKg = createRouteDto.extraLoadKg ?? extraLoadKgFromVehicle;
+
+    if (vehicle) {
+      console.log(
+        `[Routes] Vehicle: ${vehicle.brand} ${vehicle.model} (${vehicle.fuelType}, ` +
+        `${vehicle.engineCapacity}cc, ${vehicle.weight}kg) ` +
+        `→ passengers=${vehicle.defaultPassengers} cargo=${vehicle.typicalCargoKg}kg ` +
+        `⇒ extraLoadKg=${extraLoadKg} | correctionFactor=${vehicle.correctionFactor?.toFixed(3) ?? '1.000'} (samples=${vehicle.correctionSampleN ?? 0})`,
+      );
+    } else {
+      console.log(`[Routes] No vehicle selected — extraLoadKg=${extraLoadKg}, correctionFactor=1.000`);
+    }
+
+    // Promise'lere erişim için dönüş değerlerini yakala (fuel call'larından önce hazır olması gerek)
+    const enrichmentPromise = (async () => {
+      const [weather, elevation] = await Promise.all([weatherPromise, elevationPromise]);
+
+      let headwindKph: number | undefined = createRouteDto.headwindKph;
+      let bearingDeg: number | undefined;
+      if (headwindKph === undefined && weather) {
+        bearingDeg = computeBearing({ lat: originLat, lng: originLng }, { lat: destLat, lng: destLng });
+        headwindKph = headwindComponent(bearingDeg, weather.windFromDeg, weather.windSpeedKph);
+      }
+
+      const env = {
+        ambientTempC: createRouteDto.ambientTempC ?? weather?.tempC,
+        headwindKph,
+        rainLevel: createRouteDto.rainLevel ?? weather?.rainLevel ?? 0,
+        elevationGainM: createRouteDto.elevationGainM ?? elevation?.totalClimbM ?? 0,
+      };
+
+      // Summary log
+      if (weather) {
+        console.log(
+          `[Routes] Weather derived: temp=${env.ambientTempC?.toFixed(1)}°C, ` +
+          `windSrc=${weather.windSpeedKph.toFixed(1)} kph from ${weather.windFromDeg}°, ` +
+          `routeBearing=${bearingDeg?.toFixed(0) ?? '—'}° ⇒ headwind=${env.headwindKph?.toFixed(1)} kph ` +
+          `(${(env.headwindKph ?? 0) > 0 ? 'HEAD' : (env.headwindKph ?? 0) < 0 ? 'TAIL' : 'NONE'}) · rain=${env.rainLevel}`,
+        );
+      } else {
+        console.log('[Routes] Weather unavailable — using neutral values');
+      }
+      if (elevation) {
+        console.log(
+          `[Routes] Elevation derived: +${elevation.totalClimbM.toFixed(0)}m / -${elevation.totalDescentM.toFixed(0)}m`,
+        );
+      }
+
+      return env;
+    })();
 
     const primaryTollPromise = this.tolls.calculateTollCost(route, vehicle, googleTollHint);
 
-    const primaryFuelPromise = this.fuelAi.calculateFuelCost({
-      distanceKm,
-      durationSeconds: leg.duration.value,
-      hasClimateControl: createRouteDto.hasClimateControl,
-      acOn: createRouteDto.hasClimateControl,
-      cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
-      engineDisplacementL: createRouteDto.engineDisplacementL,
-      ambientTempC: createRouteDto.ambientTempC,
-      extraLoadKg: createRouteDto.extraLoadKg,
-      headwindKph: createRouteDto.headwindKph,
-      rainLevel: createRouteDto.rainLevel,
-      elevationGainM: createRouteDto.elevationGainM,
-      averageConsumption: epaFuelEconomyL100 ? (distanceKm * epaFuelEconomyL100) / 100 : undefined,
-      vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
-    });
+    // Primary fuel — enrichment tamamlanınca başlar (içte await)
+    const primaryFuelPromise = (async () => {
+      const env = await enrichmentPromise;
+      return this.fuelAi.calculateFuelCost({
+        distanceKm,
+        durationSeconds: leg.duration.value,
+        hasClimateControl: createRouteDto.hasClimateControl,
+        acOn: createRouteDto.hasClimateControl,
+        cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
+        engineDisplacementL: createRouteDto.engineDisplacementL,
+        ambientTempC: env.ambientTempC,
+        extraLoadKg,
+        headwindKph: env.headwindKph,
+        rainLevel: env.rainLevel,
+        elevationGainM: env.elevationGainM,
+        averageConsumption: epaFuelEconomyL100 ? (distanceKm * epaFuelEconomyL100) / 100 : undefined,
+        vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
+      });
+    })();
 
-    // Yakıt ikmali simülasyonu — sadece vehicleId varsa.
+    // Yakıt ikmali simülasyonu — sadece vehicleId varsa, env ile zenginleştirilmiş.
     const fuelSimPromise: Promise<any> = vehicle
       ? (async () => {
           try {
+            const env = await enrichmentPromise;
             const coords = this.decodeStepsToCoords(leg.steps);
             const routeProvinces = extractProvincesFromCoords(coords);
             return await this.fuelSim.simulate({
@@ -146,11 +244,12 @@ export class RoutesService {
               cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
               acOn: createRouteDto.hasClimateControl,
               engineDisplacementL: createRouteDto.engineDisplacementL,
-              ambientTempC: createRouteDto.ambientTempC,
-              extraLoadKg: createRouteDto.extraLoadKg,
-              headwindKph: createRouteDto.headwindKph,
-              rainLevel: createRouteDto.rainLevel,
-              elevationGainM: createRouteDto.elevationGainM,
+              ambientTempC: env.ambientTempC,
+              extraLoadKg,
+              headwindKph: env.headwindKph,
+              rainLevel: env.rainLevel as 0 | 1 | 2 | 3,
+              elevationGainM: env.elevationGainM,
+              vehicleMassKg: vehicle.weight,
             });
           } catch (e) {
             console.error('[RoutesService] Fuel simulation failed:', e);
@@ -160,12 +259,24 @@ export class RoutesService {
       : Promise.resolve(null);
 
     // Her alternatif rota kendi içinde toll+fuel'ı paralel hesaplar
+    // Alternatifin kendi elevation'ı hesaplanır (polyline farklı); weather aynı origin.
     const altTasks = allRoutes.slice(1).map(async (alt, idx) => {
       const i = idx + 1;
       try {
         const altRoute = alt.legacy.routes[0];
         const altLeg = altRoute.legs[0];
         const altDistanceKm = altLeg.distance.value / 1000;
+
+        // Alt rotanın kendi elevation'ı — weather + headwind origin'de ortak
+        const altElevationPromise = alt.encodedPolyline
+          ? this.googleMaps
+              .getElevationProfile(alt.encodedPolyline)
+              .catch(() => null)
+          : Promise.resolve(null);
+
+        const [env, altElevation] = await Promise.all([enrichmentPromise, altElevationPromise]);
+        const altElevGainM =
+          createRouteDto.elevationGainM ?? altElevation?.totalClimbM ?? env.elevationGainM ?? 0;
 
         const [altToll, altFuel] = await Promise.all([
           this.tolls.calculateTollCost(altRoute, vehicle, alt.tollInfo),
@@ -176,11 +287,11 @@ export class RoutesService {
             acOn: createRouteDto.hasClimateControl,
             cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
             engineDisplacementL: createRouteDto.engineDisplacementL,
-            ambientTempC: createRouteDto.ambientTempC,
-            extraLoadKg: createRouteDto.extraLoadKg,
-            headwindKph: createRouteDto.headwindKph,
-            rainLevel: createRouteDto.rainLevel,
-            elevationGainM: createRouteDto.elevationGainM,
+            ambientTempC: env.ambientTempC,
+            extraLoadKg,
+            headwindKph: env.headwindKph,
+            rainLevel: env.rainLevel as 0 | 1 | 2 | 3,
+            elevationGainM: altElevGainM,
             averageConsumption: epaFuelEconomyL100 ? (altDistanceKm * epaFuelEconomyL100) / 100 : undefined,
             vehicleType: vehicle ? vehicle.fuelType.toLowerCase() : undefined,
           }),
@@ -220,17 +331,48 @@ export class RoutesService {
     });
 
     // ── TEK BİR AWAIT: her şey aynı anda çalışır ──
-    const [tollData, fuelResult, fuelSimulation, altsSettled, stops, nearbyRestAreas] = await Promise.all([
+    const [tollData, fuelResult, fuelSimulation, altsSettled, stops, nearbyRestAreas, env] = await Promise.all([
       primaryTollPromise,
       primaryFuelPromise,
       fuelSimPromise,
       Promise.all(altTasks),
       stopsPromise,
       restAreasPromise,
+      enrichmentPromise,
     ]);
 
+    // Kalibrasyon: vehicle'ın correction factor'ü varsa uygula (post-trip loop'tan öğrenilmiş)
+    const correction = vehicle?.correctionFactor ?? 1.0;
+
+    // Yakıt maliyeti seçimi:
+    //   - Simülasyon çalıştıysa (vehicle var, provinces çıktı) → gerçek pompa
+    //     toplamı kullan. Bu il bazlı canlı fiyatlarla + 20% reserve ikmal
+    //     modeli → kullanıcının fiilen ödeyeceği meblağ. UI'daki "Yakıt"
+    //     kartı ile "İkmal Durakları" kartı tutarlı olur.
+    //   - Simülasyon yoksa → fuelAi'nin tüketim × varsayılan fiyat tahminini
+    //     kullan (correction factor bu path'te geçerli).
+    const simTotalFuelCost = typeof fuelSimulation?.totalFuelCost === 'number'
+      ? fuelSimulation.totalFuelCost
+      : null;
+    const useSimAsPrimary = simTotalFuelCost !== null && simTotalFuelCost > 0;
+    const primaryFuelCost = useSimAsPrimary
+      ? simTotalFuelCost! * correction // correction sim pompa'ya da uygulanır (kullanıcının sürüş stili/verimi)
+      : fuelResult.fuelCost * correction;
+
+    const calibratedFuelCost = primaryFuelCost;
+    const totalCost = tollData.totalCost + calibratedFuelCost;
+
+    console.log(
+      `[Routes] ═══ RESULT ═══ ` +
+      `aiFuelCost=${fuelResult.fuelCost.toFixed(2)} TL · ` +
+      `simFuelCost=${simTotalFuelCost?.toFixed(2) ?? '—'} TL · ` +
+      `primary=${useSimAsPrimary ? 'SIM' : 'AI'} · ` +
+      `correction=×${correction.toFixed(3)} · ` +
+      `calibrated=${calibratedFuelCost.toFixed(2)} TL · ` +
+      `toll=${tollData.totalCost.toFixed(2)} · TOTAL=${totalCost.toFixed(2)} TL`,
+    );
+
     const alternatives = altsSettled.filter((a): a is NonNullable<typeof a> => !!a);
-    const totalCost = tollData.totalCost + fuelResult.fuelCost;
 
     // 6. DB kayıt — hesaplama bittiği anda persiste et
     const savedRoute = await this.prisma.$transaction(async (tx) => {
@@ -256,11 +398,17 @@ export class RoutesService {
           alternativesJson: alternatives.length > 0 ? (alternatives as any) : null,
           tollCost: tollData.totalCost,
           tollDetails: tollData.details as any,
-          fuelCost: fuelResult.fuelCost,
+          fuelCost: calibratedFuelCost,
           totalCost: totalCost,
           aiFuelEstimate: fuelResult.estimatedConsumption,
           aiConfidence: fuelResult.confidence,
           status: RouteStatus.COMPLETED,
+          // Çevresel snapshot (audit + future ML training)
+          ambientTempC: env.ambientTempC,
+          headwindKph: env.headwindKph,
+          rainLevel: env.rainLevel,
+          elevationGainM: env.elevationGainM,
+          extraLoadKg,
         },
         include: {
           vehicle: true,
@@ -272,7 +420,7 @@ export class RoutesService {
       route: savedRoute,
       tollCost: tollData.totalCost,
       tollDetails: tollData.details,
-      fuelCost: fuelResult.fuelCost,
+      fuelCost: calibratedFuelCost,
       totalCost,
       fuelDetails: fuelResult,
       stops,
@@ -281,14 +429,27 @@ export class RoutesService {
       distance: leg.distance.text,
       alternatives,
       fuelSimulation: fuelSimulation || undefined,
+      // Çevresel snapshot — client ister debug ister UI için kullanabilir (şimdilik
+      // mobile UI kullanmıyor ama backend her zaman döndürüyor).
+      environmental: {
+        ambientTempC: env.ambientTempC,
+        headwindKph: env.headwindKph,
+        rainLevel: env.rainLevel,
+        elevationGainM: env.elevationGainM,
+        extraLoadKg,
+        correctionFactorApplied: correction,
+      },
     };
 
     // Tam sonuç cache — arka planda yaz (6 saat TTL)
     // NOT: fuelSimulation cache'lenmez; initialFuelPct kullanıcıya özel.
+    // env + correction + extraLoadKg da dahil — persistAndReturnFromCache bunları
+    // route kaydına yazıyor.
     this.cache.set(exactCacheKey, {
       tollData,
       fuelResult,
       totalCost,
+      calibratedFuelCost,
       stops,
       nearbyRestAreas,
       duration: leg.duration.text,
@@ -296,6 +457,9 @@ export class RoutesService {
       alternatives,
       allRoutes,
       createRouteDto,
+      env,
+      extraLoadKg,
+      correction,
     }, 6 * 60 * 60 * 1000).catch(() => {});
 
     return result;
@@ -310,11 +474,55 @@ export class RoutesService {
     vehicleId: string | undefined,
     createRouteDto: CreateRouteDto,
   ): Promise<any> {
-    const { tollData, fuelResult, totalCost, stops, nearbyRestAreas, duration, distance, allRoutes, alternatives } = cached;
+    const {
+      tollData, fuelResult, totalCost, calibratedFuelCost, stops, nearbyRestAreas,
+      duration, distance, allRoutes, alternatives, env, extraLoadKg, correction,
+    } = cached;
     const primary = allRoutes[0];
     const googleRoute = primary.legacy;
     const route = googleRoute.routes[0];
     const leg = route.legs[0];
+
+    // Cache hit path — yakıt simülasyonunu taze hesapla (initialFuelPct değişebilir).
+    // Persist ETMEDEN ÖNCE çalıştırıyoruz ki primaryFuelCost fresh sim'den türesin.
+    let cachedFuelSim: any = null;
+    if (vehicleId) {
+      try {
+        const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
+        if (vehicle) {
+          const coords = this.decodeStepsToCoords(leg.steps);
+          const routeProvinces = extractProvincesFromCoords(coords);
+          cachedFuelSim = await this.fuelSim.simulate({
+            vehicleId: vehicle.id,
+            initialFuelPct: createRouteDto.initialFuelPct ?? 80,
+            reserveThresholdPct: createRouteDto.reserveThresholdPct,
+            routeProvinces,
+            totalDistanceKm: leg.distance.value / 1000,
+            fallbackL100: fuelResult?.estimatedConsumption
+              ? (fuelResult.estimatedConsumption * 100) / (leg.distance.value / 1000)
+              : undefined,
+            cruisingSpeedKph: createRouteDto.cruisingSpeedKph,
+            acOn: createRouteDto.hasClimateControl,
+            engineDisplacementL: createRouteDto.engineDisplacementL,
+            ambientTempC: env?.ambientTempC,
+            extraLoadKg,
+            headwindKph: env?.headwindKph,
+            rainLevel: env?.rainLevel as 0 | 1 | 2 | 3 | undefined,
+            elevationGainM: env?.elevationGainM,
+            vehicleMassKg: vehicle.weight,
+          });
+        }
+      } catch (e) {
+        console.error('[RoutesService] Cached fuel simulation failed:', e);
+      }
+    }
+
+    // Fresh sim varsa pompa toplamını kullan, yoksa cached calibrated (AI path).
+    const freshSimTotal = typeof cachedFuelSim?.totalFuelCost === 'number'
+      ? cachedFuelSim.totalFuelCost * (correction ?? 1.0)
+      : null;
+    const finalFuelCost = freshSimTotal ?? calibratedFuelCost ?? fuelResult.fuelCost;
+    const finalTotalCost = tollData.totalCost + finalFuelCost;
 
     const savedRoute = await this.prisma.route.create({
       data: {
@@ -338,45 +546,27 @@ export class RoutesService {
         alternativesJson: alternatives && alternatives.length > 0 ? (alternatives as any) : null,
         tollCost: tollData.totalCost,
         tollDetails: tollData.details as any,
-        fuelCost: fuelResult.fuelCost,
-        totalCost: totalCost,
+        fuelCost: finalFuelCost,
+        totalCost: finalTotalCost,
         aiFuelEstimate: fuelResult.estimatedConsumption,
         aiConfidence: fuelResult.confidence,
         status: RouteStatus.COMPLETED,
+        // Çevresel snapshot — cache miss path ile aynı alanlar
+        ambientTempC: env?.ambientTempC ?? null,
+        headwindKph: env?.headwindKph ?? null,
+        rainLevel: env?.rainLevel ?? null,
+        elevationGainM: env?.elevationGainM ?? null,
+        extraLoadKg: extraLoadKg ?? null,
       },
       include: { vehicle: true },
     });
-
-    // Cache hit path — yakıt simülasyonunu taze hesapla (initialFuelPct değişebilir).
-    let cachedFuelSim: any = null;
-    if (vehicleId) {
-      try {
-        const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
-        if (vehicle) {
-          const coords = this.decodeStepsToCoords(leg.steps);
-          const routeProvinces = extractProvincesFromCoords(coords);
-          cachedFuelSim = await this.fuelSim.simulate({
-            vehicleId: vehicle.id,
-            initialFuelPct: createRouteDto.initialFuelPct ?? 80,
-            reserveThresholdPct: createRouteDto.reserveThresholdPct ?? 10,
-            routeProvinces,
-            totalDistanceKm: leg.distance.value / 1000,
-            fallbackL100: fuelResult?.estimatedConsumption
-              ? (fuelResult.estimatedConsumption * 100) / (leg.distance.value / 1000)
-              : undefined,
-          });
-        }
-      } catch (e) {
-        console.error('[RoutesService] Cached fuel simulation failed:', e);
-      }
-    }
 
     return {
       route: savedRoute,
       tollCost: tollData.totalCost,
       tollDetails: tollData.details,
-      fuelCost: fuelResult.fuelCost,
-      totalCost,
+      fuelCost: finalFuelCost,
+      totalCost: finalTotalCost,
       fuelDetails: fuelResult,
       stops,
       nearbyRestAreas,
@@ -384,6 +574,14 @@ export class RoutesService {
       distance,
       alternatives: alternatives || [],
       fuelSimulation: cachedFuelSim || undefined,
+      environmental: {
+        ambientTempC: env?.ambientTempC,
+        headwindKph: env?.headwindKph,
+        rainLevel: env?.rainLevel,
+        elevationGainM: env?.elevationGainM,
+        extraLoadKg,
+        correctionFactorApplied: correction ?? 1.0,
+      },
     };
   }
 
@@ -445,6 +643,61 @@ export class RoutesService {
     await this.findOne(id, userId); // Check ownership
     await this.prisma.route.delete({ where: { id } });
     return { message: 'Route deleted successfully' };
+  }
+
+  /**
+   * Post-trip calibration:
+   * - Route'a actualFuelL yazılır + completedAt güncellenir
+   * - Vehicle.correctionFactor = running avg of (actualL / estimatedL)
+   * - deltaRatio [0.5, 2.0] aralığına clamp edilir (sürpriz değerlere karşı)
+   * - Tahmin saçma (<= 0) ise kalibrasyon atlanır ama kayıt yine de yazılır
+   */
+  async completeRoute(routeId: string, userId: string, dto: CompleteRouteDto) {
+    const route = await this.prisma.route.findFirst({
+      where: { id: routeId, userId },
+      include: { vehicle: true },
+    });
+    if (!route) throw new NotFoundException('Rota bulunamadı.');
+
+    // Tahmin edilen yakıt (L) — aiFuelEstimate varsa onu kullan, yoksa fuelCost / price
+    let estimatedL = Number(route.aiFuelEstimate ?? 0);
+    if (estimatedL <= 0) {
+      const price = this.fuelPrice.getPriceForType(route.vehicle?.fuelType?.toLowerCase() ?? 'petrol');
+      if (price > 0) estimatedL = Number(route.fuelCost) / price;
+    }
+
+    // Kayıt her durumda yapılır
+    await this.prisma.route.update({
+      where: { id: routeId },
+      data: { actualFuelL: dto.actualFuelL, completedAt: new Date() },
+    });
+
+    // Kalibrasyon sadece estimate varsa + vehicleId bağlıysa
+    if (!route.vehicleId || estimatedL <= 0) {
+      return {
+        success: true,
+        calibrated: false,
+        reason: !route.vehicleId ? 'no-vehicle' : 'no-estimate',
+      };
+    }
+
+    const deltaRatio = dto.actualFuelL / estimatedL;
+    const clamped = Math.max(0.5, Math.min(2.0, deltaRatio));
+
+    await this.vehicles.updateCorrectionFactor(route.vehicleId, clamped);
+
+    const updatedVehicle = await this.prisma.vehicle.findUnique({
+      where: { id: route.vehicleId },
+      select: { correctionFactor: true, correctionSampleN: true },
+    });
+
+    return {
+      success: true,
+      calibrated: true,
+      deltaRatio: clamped,
+      newCorrectionFactor: updatedVehicle?.correctionFactor ?? 1.0,
+      samples: updatedVehicle?.correctionSampleN ?? 0,
+    };
   }
 
   async getStats(userId: string) {

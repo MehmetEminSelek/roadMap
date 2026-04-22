@@ -24,7 +24,20 @@ RUN npm run build
 # ── Production stage ──
 FROM node:20-alpine
 
-RUN apk add --no-cache openssl
+# openssl:   Prisma
+# chromium + font/render libs: Shell fetcher'ın Playwright headless tarayıcısı
+RUN apk add --no-cache \
+    openssl \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
+
+# playwright-core paket içinden indirmesini istemesin, apk'nın chromium'unu kullan
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV CHROMIUM_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 

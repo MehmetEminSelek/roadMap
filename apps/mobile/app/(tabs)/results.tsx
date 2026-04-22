@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Dimensions, LayoutAnimation, Platform, UIManager, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Dimensions, LayoutAnimation, Platform, UIManager, Modal, TextInput } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { MapPin, Car, Clock, Fuel, ChevronLeft, Heart, Navigation, ChevronDown, ChevronUp, Coffee, X, Star } from 'lucide-react-native';
 import MapView, { Marker, Polyline, Callout, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -32,6 +32,43 @@ export default function ResultsScreen() {
   const [alternatives, setAlternatives] = useState<any[]>([]);
   const [fuelSimulation, setFuelSimulation] = useState<FuelSimulation | null>(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
+
+  // Post-trip kalibrasyon formu state'i
+  const [calibExpanded, setCalibExpanded] = useState(false);
+  const [calibValue, setCalibValue] = useState('');
+  const [calibSaving, setCalibSaving] = useState(false);
+  const [calibResult, setCalibResult] = useState<{
+    calibrated: boolean;
+    deltaRatio?: number;
+    newCorrectionFactor?: number;
+    samples?: number;
+  } | null>(null);
+
+  const handleCalibrationSubmit = async () => {
+    const liters = parseFloat(calibValue.replace(',', '.'));
+    if (!isFinite(liters) || liters <= 0) {
+      Alert.alert('Geçersiz değer', 'Litre olarak pozitif bir sayı gir (örn. 45.5).');
+      return;
+    }
+    const routeId = params.routeId as string;
+    if (!routeId) return;
+    setCalibSaving(true);
+    try {
+      const result = await routeService.completeRoute(routeId, liters);
+      setCalibResult({
+        calibrated: result.calibrated,
+        deltaRatio: result.deltaRatio,
+        newCorrectionFactor: result.newCorrectionFactor,
+        samples: result.samples,
+      });
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setCalibExpanded(false);
+    } catch (err: any) {
+      Alert.alert('Hata', err?.response?.data?.message ?? err?.message ?? 'Kaydedilemedi.');
+    } finally {
+      setCalibSaving(false);
+    }
+  };
 
   useEffect(() => {
     loadResult();
@@ -66,35 +103,53 @@ export default function ResultsScreen() {
 
   const loadResult = async () => {
     const routeId = params.routeId as string;
-    if (routeId) {
+
+    // Params'tan fresh build — calculate screen'den yeni gelmiş oluyor, güvenilir.
+    // DB'den okumak "stale Decimal serialization" gibi problem yaratabiliyor,
+    // bu yüzden params'ı primary kaynak olarak kullanıyoruz. routeId varsa
+    // DB'den sadece yedek olarak çekiyoruz (params eksikse).
+    const fromParams = buildRouteFromParams();
+    const hasGoodParams = fromParams.fuelCost > 0 && fromParams.distance > 0;
+
+    console.log('[Results] loadResult:', {
+      routeId,
+      hasGoodParams,
+      paramsFuelCost: fromParams.fuelCost,
+      paramsTotalCost: fromParams.totalCost,
+    });
+
+    if (hasGoodParams) {
+      setRoute(fromParams);
+      if (fromParams.routeCoordinates) decodePath(fromParams.routeCoordinates);
+    } else if (routeId) {
       try {
         const data = await routeService.getOne(routeId);
         if (data) {
-          setRoute(data);
-          if (data.routeCoordinates) {
-            decodePath(data.routeCoordinates);
-          }
+          // DB'den Decimal string olarak gelir — Number()'a coerce et
+          const normalized = {
+            ...data,
+            fuelCost: Number(data.fuelCost),
+            tollCost: Number(data.tollCost),
+            totalCost: Number(data.totalCost),
+          } as Route;
+          console.log('[Results] getOne normalized:', {
+            fuelCost: normalized.fuelCost,
+            totalCost: normalized.totalCost,
+          });
+          setRoute(normalized);
+          if (normalized.routeCoordinates) decodePath(normalized.routeCoordinates);
         } else {
-          const fallback = buildRouteFromParams();
-          setRoute(fallback);
-          if (fallback.routeCoordinates) {
-            decodePath(fallback.routeCoordinates);
-          }
+          setRoute(fromParams);
+          if (fromParams.routeCoordinates) decodePath(fromParams.routeCoordinates);
         }
       } catch (error) {
         console.error('Error loading route:', error);
-        const fallback = buildRouteFromParams();
-        setRoute(fallback);
-        if (fallback.routeCoordinates) {
-          decodePath(fallback.routeCoordinates);
-        }
+        setRoute(fromParams);
+        if (fromParams.routeCoordinates) decodePath(fromParams.routeCoordinates);
       }
     } else {
-      const fallback = buildRouteFromParams();
-      setRoute(fallback);
-      if (fallback.routeCoordinates) {
-        decodePath(fallback.routeCoordinates);
-      }
+      setRoute(fromParams);
+      if (fromParams.routeCoordinates) decodePath(fromParams.routeCoordinates);
     }
 
     // Parse stop suggestions if passed via params
@@ -138,15 +193,18 @@ export default function ResultsScreen() {
       console.error('Failed to parse tollDetails', e);
     }
 
+    const parseNum = (v: unknown): number =>
+      v ? parseFloat(v as string) || 0 : 0;
+
     return {
-      id: '',
+      id: (params.routeId as string) || '',
       userId: '',
       origin: (params.origin as string) || '',
       destination: (params.destination as string) || '',
-      originLat: 0,
-      originLng: 0,
-      destLat: 0,
-      destLng: 0,
+      originLat: parseNum(params.originLat),
+      originLng: parseNum(params.originLng),
+      destLat: parseNum(params.destLat),
+      destLng: parseNum(params.destLng),
       distance: parseInt(params.distance as string) || 0,
       duration: parseInt(params.duration as string) || 0,
       tollCost: parseFloat(params.tollCost as string) || 0,
@@ -393,17 +451,20 @@ export default function ResultsScreen() {
                 />
               )}
 
-              {/* Origin & Destination Markers */}
-              {route.originLat && route.originLng && (
+              {/* Origin & Destination Markers — lat/lng 0 ise (fallback params) gösterme
+                   NOT: `&&` ile zincir kullanınca 0 falsy olur VE React 0'ı literal olarak
+                   render eder ("Text strings must be rendered within a <Text>") hatası.
+                   Bu yüzden explicit boolean ternary. */}
+              {route.originLat !== 0 && route.originLng !== 0 ? (
                 <Marker coordinate={{ latitude: route.originLat, longitude: route.originLng }}>
                   <View style={[styles.mapMarker, { backgroundColor: '#34C759' }]} />
                 </Marker>
-              )}
-              {route.destLat && route.destLng && (
+              ) : null}
+              {route.destLat !== 0 && route.destLng !== 0 ? (
                 <Marker coordinate={{ latitude: route.destLat, longitude: route.destLng }}>
                   <View style={[styles.mapMarker, { backgroundColor: '#FF2D55' }]} />
                 </Marker>
-              )}
+              ) : null}
 
               {/* Toll Gate Markers (bbox-filtered) */}
               {validTolls.map((toll: any, idx: number) => (
@@ -547,6 +608,78 @@ export default function ResultsScreen() {
           </View>
         </View>
 
+        {/* ── Post-trip Calibration ───────────────────────────────────── */}
+        {/* Kullanıcı isterse gerçek yakıt tüketimini girer; backend araç
+            bazında correction factor'ü running average ile öğrenir.
+            NOT: Outer View (TouchableOpacity değil) — nested TextInput
+            sorun çıkarmasın. Toggle için ayrı header TouchableOpacity. */}
+        <View style={calibStyles.card}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => {
+              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+              setCalibExpanded((v) => !v);
+            }}
+            style={calibStyles.header}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={calibStyles.title}>Gerçek yakıt tüketimini gir (opsiyonel)</Text>
+              <Text style={calibStyles.sub}>
+                Tahminleri bir sonraki seferde araca + sürüş stiline göre kalibre eder.
+              </Text>
+            </View>
+            {calibExpanded ? <ChevronUp size={20} color="#8E8E93" /> : <ChevronDown size={20} color="#8E8E93" />}
+          </TouchableOpacity>
+
+          {calibExpanded ? (
+            <View style={{ marginTop: 14 }}>
+              <Text style={calibStyles.label}>Kaç litre yakıt harcadın?</Text>
+              <View style={calibStyles.inputRow}>
+                <TextInput
+                  style={calibStyles.input}
+                  value={calibValue}
+                  onChangeText={setCalibValue}
+                  keyboardType="decimal-pad"
+                  placeholder="45.5"
+                  placeholderTextColor="#9CA3AF"
+                  editable={!calibSaving}
+                />
+                <Text style={calibStyles.unit}>L</Text>
+              </View>
+
+              <TouchableOpacity
+                style={[calibStyles.submitBtn, calibSaving ? { opacity: 0.6 } : null]}
+                onPress={handleCalibrationSubmit}
+                activeOpacity={0.85}
+                disabled={calibSaving}
+              >
+                {calibSaving ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text style={calibStyles.submitTxt}>Kaydet</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {calibResult && !calibExpanded ? (
+            <View style={calibStyles.resultBox}>
+              {calibResult.calibrated ? (
+                <View>
+                  <Text style={calibStyles.resultOk}>
+                    {`✓ Kaydedildi. Model tahmini %${Math.round(((calibResult.deltaRatio ?? 1) - 1) * 100)} ${(calibResult.deltaRatio ?? 1) > 1 ? 'düşük' : 'yüksek'} kalmış.`}
+                  </Text>
+                  <Text style={calibStyles.resultSub}>
+                    {`Bu aracın kalibrasyon örneği: ${calibResult.samples ?? 0}/20 • aktif çarpan ×${(calibResult.newCorrectionFactor ?? 1).toFixed(3)}`}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={calibStyles.resultSub}>Kaydedildi. (Araç olmadan kalibrasyon yok.)</Text>
+              )}
+            </View>
+          ) : null}
+        </View>
+
         {/* Bottom padding for scrolling */}
         <View style={{ height: 200 }} />
       </ScrollView>
@@ -604,16 +737,16 @@ export default function ResultsScreen() {
                 zIndex={3}
               />
             )}
-            {route.originLat && route.originLng && (
+            {route.originLat !== 0 && route.originLng !== 0 ? (
               <Marker coordinate={{ latitude: route.originLat, longitude: route.originLng }}>
                 <View style={[styles.mapMarker, { backgroundColor: '#34C759' }]} />
               </Marker>
-            )}
-            {route.destLat && route.destLng && (
+            ) : null}
+            {route.destLat !== 0 && route.destLng !== 0 ? (
               <Marker coordinate={{ latitude: route.destLat, longitude: route.destLng }}>
                 <View style={[styles.mapMarker, { backgroundColor: '#FF2D55' }]} />
               </Marker>
-            )}
+            ) : null}
 
             {/* Toll Gate Markers with Labels (bbox-filtered) */}
             {validTolls.map((toll: any, idx: number) => (
@@ -696,6 +829,44 @@ export default function ResultsScreen() {
     </View>
   );
 }
+
+const calibStyles = StyleSheet.create({
+  card: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  header: { flexDirection: 'row', alignItems: 'center' },
+  title: { fontSize: 15, fontWeight: '700', color: '#1C1C1E', letterSpacing: -0.2 },
+  sub: { fontSize: 12, color: '#6B7280', marginTop: 4, lineHeight: 16 },
+  label: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginBottom: 8, letterSpacing: 0.3 },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  input: { flex: 1, fontSize: 18, paddingVertical: 12, color: '#1C1C1E', fontWeight: '600' },
+  unit: { fontSize: 15, color: '#6B7280', fontWeight: '600' },
+  submitBtn: {
+    backgroundColor: '#0A84FF',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  submitTxt: { fontSize: 15, fontWeight: '700', color: 'white', letterSpacing: -0.2 },
+  resultBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  resultOk: { fontSize: 13, fontWeight: '600', color: '#34C759' },
+  resultSub: { fontSize: 11, color: '#6B7280', marginTop: 4 },
+});
 
 const styles = StyleSheet.create({
   container: {

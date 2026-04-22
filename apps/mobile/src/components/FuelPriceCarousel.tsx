@@ -31,7 +31,7 @@ const BRAND_META: Record<string, BrandMeta> = {
   opet:  { theme: { bg: '#004B9B', fg: '#FFFFFF', sub: '#B9D0EA', accent: '#F9B000' } },
   shell: { theme: { bg: '#FBCE07', fg: '#1A1A1A', sub: '#5E4C00', accent: '#DD1D21' } },
   po:    { theme: { bg: '#E30613', fg: '#FFFFFF', sub: '#FFD3D6', accent: '#1A1A1A' } },
-  bp:    { theme: { bg: '#007E33', fg: '#FFFFFF', sub: '#C9E6D0', accent: '#FFEF00' } },
+  total: { theme: { bg: '#DA291C', fg: '#FFFFFF', sub: '#FFD0CE', accent: '#FFFFFF' } },
 };
 
 const FALLBACK_META: BrandMeta = {

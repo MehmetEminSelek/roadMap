@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -39,6 +39,7 @@ interface GeminiResponse {
 
 @Injectable()
 export class FuelAiService {
+  private readonly logger = new Logger(FuelAiService.name);
   private readonly apiKey: string;
   private readonly apiUrl: string;
 
@@ -63,7 +64,13 @@ export class FuelAiService {
     const defaultConsumption = this.getDefaultConsumption(dto.vehicleType);
     const rawBase = (distanceKm * defaultConsumption) / 100;
 
-    // Tüm tüketim faktörleri (hız, klima, trafik) FuelCalculatorService'ten.
+    this.logger.log(
+      `[FuelAi] START: distance=${distanceKm}km, type=${dto.vehicleType ?? 'default'}, ` +
+      `defaultL/100=${defaultConsumption}, rawBase=${rawBase.toFixed(2)}L, ` +
+      `epaFromDto=${dto.averageConsumption?.toFixed(2) ?? '—'}L`,
+    );
+
+    // Tüm tüketim faktörleri (hız, klima, trafik, weather, elevation, load) FuelCalculatorService'ten.
     const factors = this.fuelCalc.combinedFactor({
       speedKph: dto.cruisingSpeedKph,
       acOn: dto.acOn,
@@ -71,16 +78,37 @@ export class FuelAiService {
       hasClimateControl,
       durationSeconds,
       distanceKm,
+      ambientTempC: dto.ambientTempC,
+      headwindKph: dto.headwindKph,
+      rainLevel: dto.rainLevel,
+      elevationGainM: dto.elevationGainM,
+      extraLoadKg: dto.extraLoadKg,
     });
 
+    // weightFactor: EPA gerçek dünyada araç+yükün hafif üstünde tüketir; AI
+    // path için +5% ek margin bırakıyoruz.
     const weightFactor = dto.averageConsumption ? 1.0 : 1.05;
-    let baseConsumption = rawBase * factors.combined * weightFactor;
 
-    // Use AI for refinement if no direct consumption provided
-    let finalConsumption = dto.averageConsumption || baseConsumption;
+    let finalConsumption: number;
     let confidence = 0.75;
 
-    if (!dto.averageConsumption) {
+    if (dto.averageConsumption) {
+      // EPA path — EPA test koşulunda ölçülen baseline'ı gerçek dünyaya
+      // (hız/hava/yük/elev) göre FAKTÖRLERLE ÖLÇEKLE. Önceden bu bypass
+      // ediliyordu → 130 kph + 5000m elev + yük ile bile EPA rakamı aynen
+      // dönüyordu (bug).
+      finalConsumption = dto.averageConsumption * factors.combined;
+      this.logger.log(
+        `[FuelAi] EPA path: epaL=${dto.averageConsumption.toFixed(2)}L × combined=${factors.combined.toFixed(3)} = ${finalConsumption.toFixed(2)}L`,
+      );
+    } else {
+      // AI/default path — rawBase (default-L/100 × distance) + factors + weight
+      let baseConsumption = rawBase * factors.combined * weightFactor;
+      this.logger.log(
+        `[FuelAi] default path: rawBase=${rawBase.toFixed(2)}L × combined=${factors.combined.toFixed(3)} × weight=${weightFactor} = ${baseConsumption.toFixed(2)}L`,
+      );
+      finalConsumption = baseConsumption;
+
       const aiResult = await this.getAiFuelEstimate(
         distanceKm,
         durationSeconds,
@@ -88,20 +116,26 @@ export class FuelAiService {
       );
 
       if (aiResult && aiResult.consumption > 0) {
-        // AI returns L/100km — ancak AI döndürdüğü değerde hız/klima faktörlerini
-        // bilmiyor; elle uygulamalıyız. Aksi halde client-side userMul/defaultMul
-        // çarpanı "faktörsüz baseline"a uygulanır ve hesap tutarsız olur.
-        const aiAdjustedL100 = aiResult.consumption * factors.speedFactor * factors.acFactor;
+        // AI returns L/100km — ancak AI döndürdüğü değerde hız/klima/elev
+        // faktörlerini bilmiyor; elle uygulayalım.
+        const aiAdjustedL100 = aiResult.consumption * factors.combined;
         finalConsumption = (distanceKm * aiAdjustedL100) / 100;
         confidence = aiResult.confidence;
-        console.log(`🤖 AI yakıt tahmini: ${aiResult.consumption} L/100km → faktörlü ${aiAdjustedL100.toFixed(2)} → ${finalConsumption.toFixed(1)}L toplam (güven: ${(confidence * 100).toFixed(0)}%)`);
+        this.logger.log(
+          `[FuelAi] AI refinement: raw=${aiResult.consumption}L/100km × combined=${factors.combined.toFixed(3)} ` +
+          `= ${aiAdjustedL100.toFixed(2)}L/100km → ${finalConsumption.toFixed(2)}L total (confidence ${(confidence * 100).toFixed(0)}%)`,
+        );
       } else {
-        console.log(`⚠️ AI yakıt tahmini başarısız, varsayılan hesaplama kullanılıyor: ${finalConsumption.toFixed(1)}L`);
+        this.logger.warn(`[FuelAi] AI failed → using default path ${finalConsumption.toFixed(2)}L`);
       }
     }
 
     const currentFuelPrice = this.fuelPriceService.getPriceForType(dto.vehicleType || 'petrol');
     const totalFuelCost = finalConsumption * currentFuelPrice;
+    this.logger.log(
+      `[FuelAi] DONE: consumption=${finalConsumption.toFixed(2)}L × price=${currentFuelPrice.toFixed(2)} TL/L ` +
+      `= ${totalFuelCost.toFixed(2)} TL`,
+    );
 
     return {
       fuelCost: totalFuelCost,

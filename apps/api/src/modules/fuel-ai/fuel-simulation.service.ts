@@ -105,6 +105,10 @@ export class FuelSimulationService {
     if (!trim?.fuelEconomyL100 && !input.fallbackL100) {
       warnings.push(`Ortalama tüketim verisi yok, ${l100Base} L/100km varsayıldı.`);
     }
+    this.logger.log(
+      `[FuelSim] START: vehicle=${vehicle.brand} ${vehicle.model}, tank=${tankCapacity}L, ` +
+      `EPA=${l100Base}L/100km, initFuel=${input.initialFuelPct}%, distance=${input.totalDistanceKm.toFixed(1)}km`,
+    );
 
     // Tüm çevresel faktörler. Trafik faktörü simülasyonda anlam taşımaz
     // (province segmentlerine bakıyoruz, ortalama hız hesabı anlamlı değil);
@@ -123,6 +127,9 @@ export class FuelSimulationService {
       baseL100: l100Base,
     });
     const l100 = l100Base * factors.combined;
+    this.logger.log(
+      `[FuelSim] effective L/100km = ${l100Base}×${factors.combined.toFixed(3)} = ${l100.toFixed(2)}`,
+    );
 
     // Marka tercihi
     const preferredBrand =
@@ -180,6 +187,12 @@ export class FuelSimulationService {
           currentLiters = tankCapacity;
           const tankAfterPct = 100;
 
+          this.logger.log(
+            `[FuelSim] STOP #${stops.length + 1} @ km ${round(cursorKm)} ${getProvinceName(seg.provinceCode)} ` +
+            `(${preferredBrand}) · before=${round(tankBeforePct, 1)}% → full · ` +
+            `${round(litersPurchased, 1)}L × ${round(pricePerLiter, 2)}TL = ${round(cost, 2)}TL`,
+          );
+
           stops.push({
             atKm: round(cursorKm),
             provinceCode: seg.provinceCode,
@@ -207,6 +220,12 @@ export class FuelSimulationService {
     if (stops.length === 0) {
       warnings.push('Bu rotada yakıt alman gerekmiyor.');
     }
+
+    this.logger.log(
+      `[FuelSim] DONE: ${stops.length} stops · purchased=${round(totalLitersPurchased, 1)}L · ` +
+      `consumed=${round(litersConsumedTotal, 1)}L · ending=${round(endingFuelPct, 1)}% · ` +
+      `totalStopCost=${round(totalFuelCost, 2)}TL`,
+    );
 
     return {
       stops,

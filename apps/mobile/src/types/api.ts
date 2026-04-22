@@ -30,6 +30,13 @@ export interface Vehicle {
   transmission: Transmission;
   hasClimateControl: boolean;
   preferredFuelBrand?: string | null;
+  /** Tipik yolcu sayısı (sürücü dahil). */
+  defaultPassengers?: number;
+  /** Tipik bagaj ağırlığı kg. */
+  typicalCargoKg?: number;
+  /** Post-trip kalibrasyon: actualL/estimatedL running avg. */
+  correctionFactor?: number;
+  correctionSampleN?: number;
   createdAt: string;
 }
 
@@ -203,6 +210,10 @@ export interface CreateVehicleRequest {
   transmission: Transmission;
   hasClimateControl?: boolean;
   preferredFuelBrand?: string;
+  /** Tipik yolcu sayısı (sürücü dahil). */
+  defaultPassengers?: number;
+  /** Tipik bagaj ağırlığı kg. */
+  typicalCargoKg?: number;
 }
 
 export interface PaginatedResponse<T> {
