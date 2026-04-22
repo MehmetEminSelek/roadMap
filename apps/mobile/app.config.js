@@ -4,7 +4,7 @@ export default {
     slug: "roadapp",
     owner: "memik",
     scheme: "roadmap",
-    version: "1.0.0",
+    version: "1.1.0",
     orientation: "portrait",
     updates: {
       fallbackToCacheTimeout: 0
@@ -15,14 +15,14 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.masrafim.roadapp",
-      buildNumber: "1",
+      buildNumber: "2",
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "Konumunuza erişim gereklidir."
       }
     },
     android: {
       package: "com.masrafim.roadapp",
-      versionCode: 1,
+      versionCode: 2,
       blockedPermissions: [
         "android.permission.RECORD_AUDIO"
       ],
