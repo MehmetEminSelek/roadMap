@@ -34,6 +34,10 @@ const TURKEY_REGION = {
   longitudeDelta: 12,
 };
 
+/** Sheet açılırken prefetch'e giden varsayılan yakıt % (kullanıcı sheet'te
+ *  bunu değiştirebilir; değişirse confirm'de yeniden fire ediyoruz). */
+const DEFAULT_PREFETCH_FUEL_PCT = 80;
+
 export default function CalculateScreen() {
   const insets = useSafeAreaInsets();
   const { location: userLocation } = useUserLocation();
@@ -42,16 +46,17 @@ export default function CalculateScreen() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [vehiclePanelOpen, setVehiclePanelOpen] = useState(false);
-  const [initialFuelPct, setInitialFuelPct] = useState(80);
   const [calculating, setCalculating] = useState(false);
   const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
   const [debouncedInput, setDebouncedInput] = useState('');
   const [sheetVisible, setSheetVisible] = useState(false);
   const inputRef = useRef<string>('');
-  // Background prefetch: "Hesapla" butonuna basıldığında hemen rota isteği
-  // fırlatılıyor; sheet'te ayar yapılırken response geliyor, onay'da anında
-  // navigate.
+  // Background prefetch: "Hesapla" butonuna basıldığında sheet açılırken
+  // arka planda varsayılan yakıt % (DEFAULT_PREFETCH_FUEL_PCT) ile route isteği
+  // fırlatılıyor. Sheet'te kullanıcı yakıt sliderını oynatırsa prefetch iptal,
+  // confirm'de yeni değerle tekrar fire (fuelSimulation fuelPct'ye bağlı).
   const prefetchPromiseRef = useRef<Promise<any> | null>(null);
+  const prefetchFuelPctRef = useRef<number>(DEFAULT_PREFETCH_FUEL_PCT);
 
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -142,34 +147,50 @@ export default function CalculateScreen() {
 
   /**
    * "Hesapla" → sheet'i aç ve aynı anda arka planda route API call'u başlat.
-   * Kullanıcı hız/klima ayarlarken response hazırlanıyor; sheet confirm'de
-   * client-side hız+klima çarpanı uygulanıp results'a navigate ediliyor.
+   * Prefetch varsayılan fuelPct (80) ile gidiyor. Eğer kullanıcı sheet'te bunu
+   * değiştirirse confirm'de yeniden fire edilecek (fuelSimulation fuelPct'ye
+   * bağlı). Hız + klima faktörleri tüm durumlarda client-side uygulanır.
    */
   const handleCalculate = () => {
     if (!canCalculate) return;
-    prefetchPromiseRef.current = routeService
+    prefetchFuelPctRef.current = DEFAULT_PREFETCH_FUEL_PCT;
+    prefetchPromiseRef.current = fireRouteCall(DEFAULT_PREFETCH_FUEL_PCT);
+    setSheetVisible(true);
+  };
+
+  /** Route API çağrısı (prefetch VE kullanıcı fuel% değiştirdiğinde çağrılır). */
+  const fireRouteCall = (fuelPct: number) =>
+    routeService
       .calculate({
         origin: origin.trim(),
         destination: destination.trim(),
         vehicleId: selectedVehicle || undefined,
-        initialFuelPct: selectedVehicle ? initialFuelPct : undefined,
+        initialFuelPct: selectedVehicle ? fuelPct : undefined,
         cruisingSpeedKph: 110,
         hasClimateControl: true,
       })
       .catch((err) => {
-        // Hata'yı ref'e gömmek yerine re-throw → handleSheetConfirm yakalar
+        // Hata'yı re-throw → handleSheetConfirm yakalar
         throw err;
       });
-    setSheetVisible(true);
-  };
 
   const handleSheetConfirm = async ({ speedKph, acOn, initialFuelPct: sheetFuelPct }: ExtraParams) => {
     setCalculating(true);
     try {
-      const result = await prefetchPromiseRef.current;
+      // Kullanıcı fuel% değiştirdiyse prefetch stale → yeniden fire.
+      // Simülasyon tamamen fuelPct'ye bağlı olduğu için client-side adjust
+      // mümkün değil.
+      const needsRefire =
+        !!selectedVehicle && sheetFuelPct !== prefetchFuelPctRef.current;
+
+      const resultPromise = needsRefire
+        ? fireRouteCall(sheetFuelPct)
+        : prefetchPromiseRef.current;
+
+      const result = await resultPromise;
       if (!result) throw new Error('Rota hesaplanamadı.');
 
-      // Client-side hız + klima düzeltmesi
+      // Client-side hız + klima düzeltmesi (server default 110/AC-on ile gelir)
       const speedF = (kph: number) => Math.max(0.80, Math.min(1.60, Math.pow(kph / 90, 1.8)));
       const acF = (on: boolean) => (on ? 1.06 : 1.0);
       const defaultMul = speedF(110) * acF(true);
@@ -199,7 +220,6 @@ export default function CalculateScreen() {
           fuelSimulation: result.fuelSimulation ? JSON.stringify(result.fuelSimulation) : '',
           speedKph: String(speedKph),
           acOn: String(acOn),
-          sheetFuelPct: String(sheetFuelPct),
         },
       });
     } catch (err: any) {
@@ -361,7 +381,7 @@ export default function CalculateScreen() {
       <ExtraParamsSheet
         visible={sheetVisible}
         hasVehicle={!!selectedVehicleObj}
-        defaultFuelPct={initialFuelPct}
+        defaultFuelPct={DEFAULT_PREFETCH_FUEL_PCT}
         loading={calculating}
         onConfirm={handleSheetConfirm}
         onCancel={() => {

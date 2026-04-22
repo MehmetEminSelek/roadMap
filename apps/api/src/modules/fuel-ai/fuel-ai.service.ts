@@ -88,10 +88,13 @@ export class FuelAiService {
       );
 
       if (aiResult && aiResult.consumption > 0) {
-        // AI returns L/100km — convert to total liters
-        finalConsumption = (distanceKm * aiResult.consumption) / 100;
+        // AI returns L/100km — ancak AI döndürdüğü değerde hız/klima faktörlerini
+        // bilmiyor; elle uygulamalıyız. Aksi halde client-side userMul/defaultMul
+        // çarpanı "faktörsüz baseline"a uygulanır ve hesap tutarsız olur.
+        const aiAdjustedL100 = aiResult.consumption * factors.speedFactor * factors.acFactor;
+        finalConsumption = (distanceKm * aiAdjustedL100) / 100;
         confidence = aiResult.confidence;
-        console.log(`🤖 AI yakıt tahmini: ${aiResult.consumption} L/100km = ${finalConsumption.toFixed(1)}L toplam (güven: ${(confidence * 100).toFixed(0)}%)`);
+        console.log(`🤖 AI yakıt tahmini: ${aiResult.consumption} L/100km → faktörlü ${aiAdjustedL100.toFixed(2)} → ${finalConsumption.toFixed(1)}L toplam (güven: ${(confidence * 100).toFixed(0)}%)`);
       } else {
         console.log(`⚠️ AI yakıt tahmini başarısız, varsayılan hesaplama kullanılıyor: ${finalConsumption.toFixed(1)}L`);
       }
