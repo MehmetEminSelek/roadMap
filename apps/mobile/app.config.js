@@ -1,6 +1,6 @@
 export default {
   expo: {
-    name: "Masrafım",
+    name: "YolCu",
     slug: "roadapp",
     owner: "memik",
     scheme: "roadmap",
@@ -14,14 +14,14 @@ export default {
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.masrafim.roadapp",
+      bundleIdentifier: "com.yolcu.mobile",
       buildNumber: "2",
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "Konumunuza erişim gereklidir."
       }
     },
     android: {
-      package: "com.masrafim.roadapp",
+      package: "com.yolcu.mobile",
       versionCode: 2,
       blockedPermissions: [
         "android.permission.RECORD_AUDIO"
